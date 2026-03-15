@@ -4,7 +4,8 @@
 
 extends: default
 
-ignore: []
+ignore:
+  - 'testdata/rfc8617-appendix-b.eml'
 
 rules:
   braces:
