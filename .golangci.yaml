@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2022 Comcast Cable Communications Management, LLC
+# SPDX-FileCopyrightText: 2026 Weston Schmidt <weston_schmidt@alumni.purdue.edu>
+# SPDX-License-Identifier: Apache-2.0
+---
+version: "2"
+linters:
+  enable:
+    - bodyclose
+    - dupl
+    - errorlint
+    #- funlen
+    - goconst
+    - gosec
+    - misspell
+    - prealloc
+    - unconvert
+  disable:
+    - funlen
+    - errcheck
+    - ineffassign
+  settings:
+    errorlint:
+      errorf: false
+    goconst:
+      min-occurrences: 4
+    misspell:
+      locale: US
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - dupl
+          - funlen
+        path: _test.go
+      - linters:
+          - unused
+        text: "const .+ is unused"
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
