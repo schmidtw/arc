@@ -187,14 +187,14 @@ func (f signerOptionFunc) applySigner(s *Signer) { f(s) }
 //
 // For example, "2024._domainkey.example.com".
 //
-// By default, [DefaultSignedHeaders] is used, which includes common message
+// By default, the default signed headers are used, which include common message
 // headers (From, To, Subject, Date, etc.). Use [WithSignedHeaders] to override
 // this set. If no authentication server ID is set via [WithAuthServID], it
 // defaults to the domain. If no resolver is set, [net.DefaultResolver] is used.
 func NewSigner(key crypto.Signer, domainKey string, opts ...SignerOption) (*Signer, error) {
 	s := Signer{
 		key:     key,
-		headers: append([]HeaderField{}, DefaultSignedHeaders...),
+		headers: append([]HeaderField{}, defaultSignedHeaders...),
 	}
 	for _, opt := range opts {
 		opt.applySigner(&s)
@@ -214,6 +214,9 @@ func NewSigner(key crypto.Signer, domainKey string, opts ...SignerOption) (*Sign
 
 	if s.authServID == "" {
 		s.authServID = s.domain
+	}
+	if s.resolver == nil {
+		s.resolver = net.DefaultResolver
 	}
 	s.validator = NewValidator(WithResolver(s.resolver))
 
