@@ -160,6 +160,7 @@ type Signer struct {
 	authServID string
 	headers    []HeaderField
 	algorithm  string
+	hashOpt    crypto.SignerOpts
 	timestamp  time.Time
 	resolver   Resolver
 	validator  *Validator
@@ -221,11 +222,12 @@ func NewSigner(key crypto.Signer, domainKey string, opts ...SignerOption) (*Sign
 	s.validator = NewValidator(WithResolver(s.resolver))
 
 	// Infer algorithm from key type.
-	algo, err := algorithmForKey(key)
+	algo, hashOpt, err := algorithmForKey(key)
 	if err != nil {
 		return nil, err
 	}
 	s.algorithm = algo
+	s.hashOpt = hashOpt
 
 	return &s, nil
 }
