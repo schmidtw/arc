@@ -151,6 +151,18 @@ func parseAMS(raw string) (*ams, error) {
 		return nil, fmt.Errorf("AMS missing selector: %w", err)
 	}
 
+	// Validate canonicalization. We only support relaxed/relaxed. Per DKIM
+	// (RFC 6376 Section 3.5), the default when c= is absent is simple/simple,
+	// which we do not implement.
+	cVal, hasC := tl.Get("c")
+	if !hasC {
+		return nil, fmt.Errorf("AMS missing canonicalization (c= tag)")
+	}
+	cVal = strings.TrimSpace(cVal)
+	if cVal != "relaxed/relaxed" {
+		return nil, fmt.Errorf("AMS unsupported canonicalization %q: only relaxed/relaxed is supported", cVal)
+	}
+
 	ts, err := parseTimestamp(tl)
 	if err != nil {
 		return nil, err

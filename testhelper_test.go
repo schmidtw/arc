@@ -43,7 +43,7 @@ func serializeAAR(instance int, authServID, results string) string {
 func serializeAMSForSigning(instance int, algorithm, domain, selector string, headers []string, bodyHash []byte, ts time.Time) string {
 	h := strings.Join(headers, ":")
 	bh := base64.StdEncoding.EncodeToString(bodyHash)
-	return fmt.Sprintf("ARC-Message-Signature: i=%d; a=%s; d=%s; s=%s; t=%d; h=%s; bh=%s; b=",
+	return fmt.Sprintf("ARC-Message-Signature: i=%d; a=%s; c=relaxed/relaxed; d=%s; s=%s; t=%d; h=%s; bh=%s; b=",
 		instance, algorithm, domain, selector, ts.Unix(), h, bh)
 }
 
@@ -52,7 +52,7 @@ func serializeAMS(instance int, algorithm, domain, selector string, headers []st
 	h := strings.Join(headers, ":")
 	bh := base64.StdEncoding.EncodeToString(bodyHash)
 	b := base64.StdEncoding.EncodeToString(signature)
-	return fmt.Sprintf("ARC-Message-Signature: i=%d; a=%s; d=%s; s=%s; t=%d; h=%s; bh=%s; b=%s",
+	return fmt.Sprintf("ARC-Message-Signature: i=%d; a=%s; c=relaxed/relaxed; d=%s; s=%s; t=%d; h=%s; bh=%s; b=%s",
 		instance, algorithm, domain, selector, ts.Unix(), h, bh, b)
 }
 
