@@ -11,11 +11,6 @@ import (
 	"time"
 )
 
-// Test constants
-const (
-	rsaSHA256 = "rsa-sha256"
-)
-
 // sign wraps the Signer.sign method for test convenience.
 func sign(key crypto.Signer, algorithm string, data []byte) ([]byte, error) {
 	s := Signer{

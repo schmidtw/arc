@@ -153,7 +153,7 @@ func buildSignedMessage(t *testing.T, key *rsa.PrivateKey, domain, selector stri
 	aarStr := serializeAAR(instance, domain, "spf=pass")
 
 	// Build AMS for signing (with empty b=).
-	amsForSigning := serializeAMSForSigning(instance, string(rsaSHA256), domain, selector,
+	amsForSigning := serializeAMSForSigning(instance, algRSASHA256, domain, selector,
 		signHeaders, bodyHash, ts)
 
 	// Build the data the AMS signs.
@@ -179,12 +179,12 @@ func buildSignedMessage(t *testing.T, key *rsa.PrivateKey, domain, selector stri
 	amsCanon := canonicalizeHeaderRelaxedRaw(amsForSigning)
 	amsBuf.WriteString(amsCanon)
 
-	amsSig, err := sign(key, string(rsaSHA256), []byte(amsBuf.String()))
+	amsSig, err := sign(key, algRSASHA256, []byte(amsBuf.String()))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	amsStr := serializeAMS(instance, string(rsaSHA256), domain, selector,
+	amsStr := serializeAMS(instance, algRSASHA256, domain, selector,
 		signHeaders, bodyHash, amsSig, ts)
 
 	// Build AS.
@@ -193,7 +193,7 @@ func buildSignedMessage(t *testing.T, key *rsa.PrivateKey, domain, selector stri
 		cv = string(chainPass)
 	}
 
-	asForSigning := serializeArcSealForSigning(instance, string(rsaSHA256), domain, selector, cv, ts)
+	asForSigning := serializeArcSealForSigning(instance, algRSASHA256, domain, selector, cv, ts)
 
 	// AS signs: AAR(1..K), AMS(1..K), AS(1..K-1), current AS with empty b=.
 	var asBuf strings.Builder
@@ -209,12 +209,12 @@ func buildSignedMessage(t *testing.T, key *rsa.PrivateKey, domain, selector stri
 	asCanon := canonicalizeHeaderRelaxedRaw(asForSigning)
 	asBuf.WriteString(asCanon)
 
-	asSig, err := sign(key, string(rsaSHA256), []byte(asBuf.String()))
+	asSig, err := sign(key, algRSASHA256, []byte(asBuf.String()))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	asStr := serializeArcSeal(instance, string(rsaSHA256), domain, selector, cv, asSig, ts)
+	asStr := serializeArcSeal(instance, algRSASHA256, domain, selector, cv, asSig, ts)
 
 	// Assemble final message.
 	var result strings.Builder
@@ -310,11 +310,11 @@ func TestRFC8617AppendixB(t *testing.T) {
 
 	// Verify all sets use RSA-SHA256.
 	for i, s := range sets {
-		if s.Seal.Algorithm != rsaSHA256 {
-			t.Errorf("set[%d].Seal.Algorithm = %q, want %q", i, s.Seal.Algorithm, string(rsaSHA256))
+		if s.Seal.Algorithm != algRSASHA256 {
+			t.Errorf("set[%d].Seal.Algorithm = %q, want %q", i, s.Seal.Algorithm, algRSASHA256)
 		}
-		if s.AMS.Algorithm != rsaSHA256 {
-			t.Errorf("set[%d].AMS.Algorithm = %q, want %q", i, s.AMS.Algorithm, string(rsaSHA256))
+		if s.AMS.Algorithm != algRSASHA256 {
+			t.Errorf("set[%d].AMS.Algorithm = %q, want %q", i, s.AMS.Algorithm, algRSASHA256)
 		}
 	}
 
