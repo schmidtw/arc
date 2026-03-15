@@ -4,12 +4,26 @@
 package arc
 
 import (
+	"context"
 	"crypto"
 	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
 )
+
+// mapResolver implements Resolver with an in-memory map of TXT records.
+type mapResolver struct {
+	records map[string]string
+}
+
+func (m *mapResolver) LookupTXT(_ context.Context, name string) ([]string, error) {
+	record, ok := m.records[name]
+	if !ok {
+		return nil, fmt.Errorf("no TXT record for %q", name)
+	}
+	return []string{record}, nil
+}
 
 // sign wraps the Signer.sign method for test convenience.
 func sign(key crypto.Signer, algorithm string, data []byte) ([]byte, error) {

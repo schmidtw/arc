@@ -5,7 +5,6 @@ package arc
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -76,17 +75,5 @@ func TestValimailValidationSuite(t *testing.T) {
 
 // buildTXTRecordResolver creates a Resolver from the test suite's txt-records map.
 func buildTXTRecordResolver(records map[string]string) Resolver {
-	return &txtMapResolver{records: records}
-}
-
-type txtMapResolver struct {
-	records map[string]string
-}
-
-func (r *txtMapResolver) LookupTXT(_ context.Context, name string) ([]string, error) {
-	record, ok := r.records[name]
-	if !ok {
-		return nil, fmt.Errorf("no TXT record for %q", name)
-	}
-	return []string{record}, nil
+	return &mapResolver{records: records}
 }

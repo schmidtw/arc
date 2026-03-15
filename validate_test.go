@@ -9,25 +9,11 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
 	"time"
 )
-
-// mapResolver implements Resolver with an in-memory map of TXT records.
-type mapResolver struct {
-	records map[string]string
-}
-
-func (m *mapResolver) LookupTXT(_ context.Context, name string) ([]string, error) {
-	record, ok := m.records[name]
-	if !ok {
-		return nil, fmt.Errorf("no TXT record for %q", name)
-	}
-	return []string{record}, nil
-}
 
 func TestValidateNoArcHeaders(t *testing.T) {
 	msg := "From: test@example.com\r\nTo: dest@example.com\r\nSubject: Test\r\n\r\nBody.\r\n"
