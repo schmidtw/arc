@@ -15,6 +15,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -33,41 +36,23 @@ func TestSignNoExistingChain(t *testing.T) {
 		WithTimestamp(time.Unix(12345, 0)),
 		WithResolver(resolver),
 	)
-	if err != nil {
-		t.Fatalf("NewSigner: %v", err)
-	}
+	require.NoError(t, err)
 
 	result, err := signer.Sign(context.Background(), strings.NewReader(msg), "spf=pass")
-	if err != nil {
-		t.Fatalf("Sign: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify the result contains ARC headers.
 	resultStr := string(result)
-	if !strings.Contains(resultStr, "ARC-Seal:") {
-		t.Error("result missing ARC-Seal")
-	}
-	if !strings.Contains(resultStr, "ARC-Message-Signature:") {
-		t.Error("result missing ARC-Message-Signature")
-	}
-	if !strings.Contains(resultStr, "ARC-Authentication-Results:") {
-		t.Error("result missing ARC-Authentication-Results")
-	}
-	if !strings.Contains(resultStr, "cv=none") {
-		t.Error("first instance should have cv=none")
-	}
-	if !strings.Contains(resultStr, "i=1") {
-		t.Error("first instance should be i=1")
-	}
+	assert.Contains(t, resultStr, "ARC-Seal:")
+	assert.Contains(t, resultStr, "ARC-Message-Signature:")
+	assert.Contains(t, resultStr, "ARC-Authentication-Results:")
+	assert.Contains(t, resultStr, "cv=none")
+	assert.Contains(t, resultStr, "i=1")
 
 	// Validate the signed message.
 	present, err := v.ValidateBytes(context.Background(), result)
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-	if !present {
-		t.Error("expected ARC chain present")
-	}
+	require.NoError(t, err)
+	assert.True(t, present)
 }
 
 func TestSignWithExistingChain(t *testing.T) {
@@ -93,14 +78,10 @@ func TestSignWithExistingChain(t *testing.T) {
 		WithTimestamp(time.Unix(12345, 0)),
 		WithResolver(combined),
 	)
-	if err != nil {
-		t.Fatalf("NewSigner #1: %v", err)
-	}
+	require.NoError(t, err)
 
 	signed1, err := signer1.Sign(context.Background(), strings.NewReader(msg), "spf=pass")
-	if err != nil {
-		t.Fatalf("Sign #1: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Sign second time with different key.
 	signer2, err := NewSigner(key2, "sel2._domainkey.example.net",
@@ -108,31 +89,19 @@ func TestSignWithExistingChain(t *testing.T) {
 		WithTimestamp(time.Unix(12346, 0)),
 		WithResolver(combined),
 	)
-	if err != nil {
-		t.Fatalf("NewSigner #2: %v", err)
-	}
+	require.NoError(t, err)
 
 	signed2, err := signer2.SignBytes(context.Background(), signed1, "spf=fail; arc=pass")
-	if err != nil {
-		t.Fatalf("Sign #2: %v", err)
-	}
+	require.NoError(t, err)
 
 	resultStr := string(signed2)
-	if !strings.Contains(resultStr, "cv=pass") {
-		t.Error("second instance should have cv=pass")
-	}
-	if !strings.Contains(resultStr, "i=2") {
-		t.Error("second instance should be i=2")
-	}
+	assert.Contains(t, resultStr, "cv=pass")
+	assert.Contains(t, resultStr, "i=2")
 
 	// Validate the doubly-signed message.
 	present, err := v.ValidateBytes(context.Background(), signed2)
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-	if !present {
-		t.Error("expected ARC chain present")
-	}
+	require.NoError(t, err)
+	assert.True(t, present)
 }
 
 func TestSignRefusesFailedChain(t *testing.T) {
@@ -148,21 +117,15 @@ func TestSignRefusesFailedChain(t *testing.T) {
 		WithSignedHeaders(HeaderFrom),
 		WithResolver(resolver),
 	)
-	if err != nil {
-		t.Fatalf("NewSigner: %v", err)
-	}
+	require.NoError(t, err)
 
 	_, err = signer.Sign(context.Background(), strings.NewReader(msg), "spf=fail")
-	if err == nil {
-		t.Fatal("expected error when signing with failed chain")
-	}
+	require.Error(t, err)
 }
 
 func TestSignWithEd25519(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	resolver := &mapResolver{
 		records: map[string]string{
@@ -178,35 +141,23 @@ func TestSignWithEd25519(t *testing.T) {
 		WithTimestamp(time.Unix(12345, 0)),
 		WithResolver(resolver),
 	)
-	if err != nil {
-		t.Fatalf("NewSigner: %v", err)
-	}
+	require.NoError(t, err)
 
 	result, err := signer.Sign(context.Background(), strings.NewReader(msg), "spf=pass")
-	if err != nil {
-		t.Fatalf("Sign: %v", err)
-	}
+	require.NoError(t, err)
 
 	present, err := v.ValidateBytes(context.Background(), result)
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-	if !present {
-		t.Error("expected ARC chain present")
-	}
+	require.NoError(t, err)
+	assert.True(t, present)
 }
 
 func TestSignUnsupportedKeyType(t *testing.T) {
 	// ecdsa keys are not supported for ARC signing.
 	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	_, err = NewSigner(ecKey, "sel._domainkey.example.org")
-	if err == nil {
-		t.Fatal("expected error for unsupported key type")
-	}
+	require.Error(t, err)
 }
 
 func TestEndToEndSignThenValidate(t *testing.T) {
@@ -215,13 +166,9 @@ func TestEndToEndSignThenValidate(t *testing.T) {
 
 	// Generate two different keys.
 	key1, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // Testing weak keys
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	key2, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // Testing weak keys
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// Create a resolver with both public keys.
 	resolver := &mapResolver{
@@ -242,23 +189,15 @@ func TestEndToEndSignThenValidate(t *testing.T) {
 		WithTimestamp(time.Unix(1234567890, 0)),
 		WithResolver(resolver),
 	)
-	if err != nil {
-		t.Fatalf("NewSigner #1: %v", err)
-	}
+	require.NoError(t, err)
 
 	signed1, err := signer1.Sign(ctx, strings.NewReader(originalMsg), "spf=pass; dkim=pass")
-	if err != nil {
-		t.Fatalf("first sign: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Validate after first signature.
 	present1, err := v.Validate(ctx, bytes.NewReader(signed1))
-	if err != nil {
-		t.Fatalf("validate after first sign: %v", err)
-	}
-	if !present1 {
-		t.Error("expected ARC chain present after first sign")
-	}
+	require.NoError(t, err)
+	assert.True(t, present1)
 
 	// Sign again with second key (instance 2).
 	signer2, err := NewSigner(key2, "sel2._domainkey.domain2.example",
@@ -266,47 +205,26 @@ func TestEndToEndSignThenValidate(t *testing.T) {
 		WithTimestamp(time.Unix(1234567900, 0)),
 		WithResolver(resolver),
 	)
-	if err != nil {
-		t.Fatalf("NewSigner #2: %v", err)
-	}
+	require.NoError(t, err)
 
 	signed2, err := signer2.Sign(ctx, bytes.NewReader(signed1), "spf=pass; dkim=pass; arc=pass")
-	if err != nil {
-		t.Fatalf("second sign: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Validate the full 2-hop chain.
 	present2, err := v.Validate(ctx, bytes.NewReader(signed2))
-	if err != nil {
-		t.Fatalf("validate after second sign: %v", err)
-	}
-	if !present2 {
-		t.Error("expected ARC chain present after second sign")
-	}
+	require.NoError(t, err)
+	assert.True(t, present2)
+
 	// Verify instance numbers.
 	parsedMsg, err := parseMessage(bytes.NewReader(signed2))
-	if err != nil {
-		t.Fatalf("parsing final message: %v", err)
-	}
+	require.NoError(t, err)
 	sets, err := collectArcSets(parsedMsg)
-	if err != nil {
-		t.Fatalf("collecting sets: %v", err)
-	}
-	if len(sets) != 2 {
-		t.Fatalf("got %d sets, want 2", len(sets))
-	}
-	if sets[0].Instance != 1 {
-		t.Errorf("set[0].Instance = %d, want 1", sets[0].Instance)
-	}
-	if sets[1].Instance != 2 {
-		t.Errorf("set[1].Instance = %d, want 2", sets[1].Instance)
-	}
+	require.NoError(t, err)
+	require.Len(t, sets, 2)
+	assert.Equal(t, 1, sets[0].Instance)
+	assert.Equal(t, 2, sets[1].Instance)
 
 	// Verify cv values.
-	if sets[0].Seal.ChainValidation != chainNone {
-		t.Errorf("set[0] cv = %q, want none", sets[0].Seal.ChainValidation)
-	}
-	if sets[1].Seal.ChainValidation != chainPass {
-		t.Errorf("set[1] cv = %q, want pass", sets[1].Seal.ChainValidation)
-	}
+	assert.Equal(t, chainNone, sets[0].Seal.ChainValidation)
+	assert.Equal(t, chainPass, sets[1].Seal.ChainValidation)
 }

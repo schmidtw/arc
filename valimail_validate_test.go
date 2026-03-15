@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,9 +34,7 @@ func TestValimailValidationSuite(t *testing.T) {
 	}
 
 	var suite valimailValidationSuite
-	if err := yaml.Unmarshal(data, &suite); err != nil {
-		t.Fatalf("parsing test suite: %v", err)
-	}
+	require.NoError(t, yaml.Unmarshal(data, &suite))
 
 	// Build resolver from TXT records.
 	resolver := buildTXTRecordResolver(suite.TXTRecords)
@@ -49,7 +49,7 @@ func TestValimailValidationSuite(t *testing.T) {
 			var got string
 			switch {
 			case !present && err != nil:
-				t.Fatalf("Validate: %v", err)
+				require.NoError(t, err)
 			case !present:
 				got = "None"
 			case err != nil:
@@ -66,9 +66,7 @@ func TestValimailValidationSuite(t *testing.T) {
 				want = "Fail"
 			}
 
-			if !strings.EqualFold(got, want) {
-				t.Errorf("cv = %q, want %q (%s)", got, want, tc.Description)
-			}
+			assert.True(t, strings.EqualFold(got, want), "cv = %q, want %q (%s)", got, want, tc.Description)
 		})
 	}
 }

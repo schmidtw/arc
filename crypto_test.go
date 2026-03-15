@@ -8,8 +8,10 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
-	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSignAndVerify(t *testing.T) {
@@ -45,9 +47,7 @@ func TestSignAndVerify(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			privKey, pubKey, err := tt.keyGen()
-			if err != nil {
-				t.Fatalf("key generation failed: %v", err)
-			}
+			require.NoError(t, err)
 
 			s := Signer{
 				algorithm: tt.algorithm,
@@ -60,13 +60,9 @@ func TestSignAndVerify(t *testing.T) {
 			}
 
 			sig, err := s.sign(data)
-			if err != nil {
-				t.Fatalf("Sign failed: %v", err)
-			}
+			require.NoError(t, err)
 
-			if err := verify(pubKey, tt.algorithm, data, sig); err != nil {
-				t.Fatalf("Verify failed: %v", err)
-			}
+			require.NoError(t, verify(pubKey, tt.algorithm, data, sig))
 		})
 	}
 }
@@ -128,9 +124,7 @@ func TestSignatureVerificationFailures(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			privKey, pubKey, err := tt.keyGen()
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 
 			s := Signer{
 				algorithm: tt.algorithm,
@@ -138,23 +132,18 @@ func TestSignatureVerificationFailures(t *testing.T) {
 			}
 
 			sig, err := s.sign(tt.signData)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 
 			if tt.corruptSig {
 				sig[0] ^= 0xFF
 			}
 
 			err = verify(pubKey, tt.algorithm, tt.verifyData, sig)
-			if tt.expectFailure && err == nil {
-				t.Fatal("expected verification failure but got success")
-			}
-			if !tt.expectFailure && err != nil {
-				t.Fatalf("expected verification success but got: %v", err)
-			}
-			if tt.expectFailure && !errors.Is(err, ErrInvalidSignature) {
-				t.Errorf("expected ErrInvalidSignature, got: %v", err)
+			if tt.expectFailure {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, ErrInvalidSignature)
+			} else {
+				require.NoError(t, err)
 			}
 		})
 	}
@@ -162,9 +151,7 @@ func TestSignatureVerificationFailures(t *testing.T) {
 
 func TestRSAWeakKeyRejected(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // Testing weak keys
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// A 1024-bit key should be accepted (at the boundary).
 	data := []byte("test data")
@@ -173,12 +160,8 @@ func TestRSAWeakKeyRejected(t *testing.T) {
 		key:       key,
 	}
 	sig, err := s.sign(data)
-	if err != nil {
-		t.Fatalf("1024-bit key should be accepted: %v", err)
-	}
-	if err := verify(&key.PublicKey, algRSASHA256, data, sig); err != nil {
-		t.Fatalf("1024-bit key verify should succeed: %v", err)
-	}
+	require.NoError(t, err)
+	require.NoError(t, verify(&key.PublicKey, algRSASHA256, data, sig))
 }
 
 func TestAlgorithmValidation(t *testing.T) {
@@ -240,20 +223,16 @@ func TestAlgorithmValidation(t *testing.T) {
 
 			sig, err := s.sign(data)
 			if tt.expectError && tt.verifyAlgo == "" {
-				if err == nil {
-					t.Fatal("expected error for key/algorithm mismatch on sign")
-				}
+				require.Error(t, err)
 				return
 			}
-			if err != nil && !tt.expectError {
-				t.Fatalf("unexpected sign error: %v", err)
+			if !tt.expectError {
+				require.NoError(t, err)
 			}
 
 			if tt.verifyAlgo != "" {
 				err = verify(pubKey, tt.verifyAlgo, data, sig)
-				if err == nil {
-					t.Fatal("expected error for unsupported algorithm on verify")
-				}
+				require.Error(t, err)
 			}
 		})
 	}
@@ -277,17 +256,11 @@ func TestComputeBodyHash(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			hash := computeBodyHash(tt.body)
-			if len(hash) != 32 {
-				t.Fatalf("expected 32-byte hash, got %d", len(hash))
-			}
+			require.Len(t, hash, 32)
 
 			// Test idempotency - same body should produce same hash.
 			hash2 := computeBodyHash(tt.body)
-			for i := range hash {
-				if hash[i] != hash2[i] {
-					t.Fatal("same body produced different hashes")
-				}
-			}
+			assert.Equal(t, hash, hash2)
 		})
 	}
 }
