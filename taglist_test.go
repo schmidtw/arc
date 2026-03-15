@@ -140,6 +140,41 @@ func TestParseTagList(t *testing.T) {
 	}
 }
 
+func TestIsValidTagName(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "single letter", input: "a", want: true},
+		{name: "uppercase letter", input: "A", want: true},
+		{name: "letters only", input: "abc", want: true},
+		{name: "mixed case", input: "aBcD", want: true},
+		{name: "letter then digits", input: "a123", want: true},
+		{name: "letter then underscore", input: "a_b", want: true},
+		{name: "letter digits underscore", input: "cv_2", want: true},
+		{name: "empty string", input: "", want: false},
+		{name: "starts with digit", input: "1a", want: false},
+		{name: "starts with underscore", input: "_a", want: false},
+		{name: "contains dot", input: "a.b", want: false},
+		{name: "contains hyphen", input: "a-b", want: false},
+		{name: "contains space", input: "a b", want: false},
+		{name: "contains equals", input: "a=b", want: false},
+		{name: "non-ASCII letter", input: "\u00e9", want: false},
+		{name: "ASCII then non-ASCII", input: "a\u00e9", want: false},
+		{name: "digit only", input: "0", want: false},
+		{name: "underscore only", input: "_", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isValidTagName(tt.input); got != tt.want {
+				t.Errorf("isValidTagName(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTagListGet(t *testing.T) {
 	tl, err := parseTagList("a=rsa-sha256; d=example.com; s=sel1")
 	if err != nil {

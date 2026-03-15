@@ -6,6 +6,7 @@ package arc
 import (
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // tagList represents a parsed tag-value list (semicolon-delimited key=value pairs).
@@ -25,8 +26,8 @@ type tag struct {
 // Format: tag1=value1; tag2=value2; ...
 // Tag names are case-sensitive and consist of alphanumeric characters
 // and underscores. Duplicate tags cause an error.
-func parseTagList(s string) (*tagList, error) {
-	tl := &tagList{
+func parseTagList(s string) (tagList, error) {
+	tl := tagList{
 		index: make(map[string]int),
 	}
 
@@ -36,31 +37,26 @@ func parseTagList(s string) (*tagList, error) {
 		return tl, nil
 	}
 
-	pairs := strings.Split(s, ";")
-	for _, pair := range pairs {
+	for pair := range strings.SplitSeq(s, ";") {
 		pair = strings.TrimSpace(pair)
 		if pair == "" {
 			continue
 		}
 
-		eqIdx := strings.IndexByte(pair, '=')
-		if eqIdx < 0 {
-			return nil, fmt.Errorf("invalid tag-value pair (missing '='): %q", pair)
+		key, value, ok := strings.Cut(pair, "=")
+		if !ok {
+			return tagList{}, fmt.Errorf("invalid tag-value pair (missing '='): %q", pair)
 		}
 
-		key := strings.TrimSpace(pair[:eqIdx])
-		value := strings.TrimSpace(pair[eqIdx+1:])
-
-		if key == "" {
-			return nil, fmt.Errorf("empty tag name in pair: %q", pair)
-		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
 
 		if !isValidTagName(key) {
-			return nil, fmt.Errorf("invalid tag name: %q", key)
+			return tagList{}, fmt.Errorf("invalid tag name: %q", key)
 		}
 
 		if _, exists := tl.index[key]; exists {
-			return nil, fmt.Errorf("duplicate tag: %q", key)
+			return tagList{}, fmt.Errorf("duplicate tag: %q", key)
 		}
 
 		tl.index[key] = len(tl.tags)
@@ -95,27 +91,23 @@ func (tl *tagList) Tags() []tag {
 
 // isValidTagName checks that a tag name matches [A-Za-z][A-Za-z0-9_]*.
 func isValidTagName(name string) bool {
-	if len(name) == 0 {
+	if name == "" {
 		return false
 	}
 	for i, c := range name {
+		if c > unicode.MaxASCII {
+			return false
+		}
+
 		if i == 0 {
-			if !isAlpha(byte(c)) { //nolint:gosec // Safe conversion for ASCII
+			if !unicode.IsLetter(c) {
 				return false
 			}
 		} else {
-			if !isAlpha(byte(c)) && !isDigit(byte(c)) && c != '_' { //nolint:gosec // Safe conversion for ASCII
+			if !unicode.IsLetter(c) && !unicode.IsDigit(c) && c != '_' {
 				return false
 			}
 		}
 	}
 	return true
-}
-
-func isAlpha(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-}
-
-func isDigit(c byte) bool {
-	return c >= '0' && c <= '9'
 }

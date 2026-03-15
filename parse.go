@@ -12,7 +12,7 @@ import (
 )
 
 // parseInstance extracts and validates the instance value from a tag list.
-func parseInstance(tl *tagList) (int, error) {
+func parseInstance(tl tagList) (int, error) {
 	iStr, err := tl.Require("i")
 	if err != nil {
 		return 0, fmt.Errorf("missing instance tag: %w", err)
@@ -28,7 +28,7 @@ func parseInstance(tl *tagList) (int, error) {
 }
 
 // parseTimestamp parses a timestamp tag value (Unix seconds).
-func parseTimestamp(tl *tagList) (time.Time, error) {
+func parseTimestamp(tl tagList) (time.Time, error) {
 	tStr, ok := tl.Get("t")
 	if !ok {
 		return time.Time{}, nil
