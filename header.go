@@ -51,10 +51,10 @@ const (
 	HeaderKeywords   HeaderField = "Keywords"
 )
 
-// ExcludedHeaders are headers that are silently removed from the signing list.
+// excludedHeaders are headers that are silently removed from the signing list.
 // ARC and Authentication-Results headers must not be signed. Headers commonly
 // modified in transit (Return-Path, Received, etc.) should not be signed.
-var ExcludedHeaders = map[HeaderField]struct{}{
+var excludedHeaders = map[HeaderField]struct{}{
 	HeaderArcSeal:                  {},
 	HeaderArcMessageSignature:      {},
 	HeaderArcAuthenticationResults: {},
@@ -65,10 +65,10 @@ var ExcludedHeaders = map[HeaderField]struct{}{
 	HeaderKeywords:                 {},
 }
 
-// DefaultSignedHeaders is the recommended set of headers to include in the
+// defaultSignedHeaders is the recommended set of headers to include in the
 // ARC-Message-Signature. It includes common message headers and DKIM-Signature,
 // while excluding ARC and Authentication-Results headers.
-var DefaultSignedHeaders = []HeaderField{
+var defaultSignedHeaders = []HeaderField{
 	HeaderFrom,
 	HeaderTo,
 	HeaderCc,

@@ -21,9 +21,9 @@ func filterSignHeaders(headers []HeaderField) []string {
 	return filtered
 }
 
-// isExcludedHeader reports whether a lowercase header is in ExcludedHeaders.
+// isExcludedHeader reports whether a lowercase header is in excludedHeaders.
 func isExcludedHeader(lower HeaderField) bool {
-	for k := range ExcludedHeaders {
+	for k := range excludedHeaders {
 		if strings.EqualFold(string(k), string(lower)) {
 			return true
 		}
