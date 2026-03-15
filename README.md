@@ -1,5 +1,12 @@
 # arc
 
+[![Build Status](https://github.com/schmidtw/arc/actions/workflows/ci.yml/badge.svg)](https://github.com/schmidtw/arc/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/schmidtw/arc/graph/badge.svg?token=yPskgmUW6Z)](https://codecov.io/gh/schmidtw/arc)
+[![Go Report Card](https://goreportcard.com/badge/github.com/schmidtw/arc)](https://goreportcard.com/report/github.com/schmidtw/arc)
+[![Apache V2 License](http://img.shields.io/badge/license-Apache%20V2-blue.svg)](https://github.com/schmidtw/arc/blob/main/LICENSE)
+[![GitHub Release](https://img.shields.io/github/release/schmidtw/arc.svg)](https://github.com/schmidtw/arc/releases)
+[![GoDoc](https://pkg.go.dev/badge/github.com/schmidtw/arc)](https://pkg.go.dev/github.com/schmidtw/arc)
+
 Go implementation of [RFC 8617](https://datatracker.ietf.org/doc/html/rfc8617), the Authenticated Received Chain (ARC) protocol.
 
 ARC provides an authenticated "chain of custody" for email messages, allowing each entity that handles a message to see what entities handled it before and what the message's authentication assessment was at each step.
@@ -70,8 +77,8 @@ Any type that implements `LookupTXT(ctx context.Context, name string) ([]string,
 
 ## Supported Algorithms
 
-- `rsa-sha256`
-- `ed25519-sha256`
+- RSA-SHA256 (`rsa-sha256`)
+- Ed25519-SHA256 (`ed25519-sha256`)
 
 ## License
 
