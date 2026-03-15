@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2024 Comcast Cable Communications Management, LLC
 # SPDX-License-Identifier: Apache-2.0
 ---
-name: 'Automatically relase patch versions.'
+name: 'Automatically release patch versions.'
 
 on:
   schedule: # Run every day at 12:00 UTC
