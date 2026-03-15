@@ -1,0 +1,46 @@
+version = 1
+SPDX-PackageName = "arc"
+SPDX-PackageSupplier = "Weston Schmidt <weston_schmidt@alumni.purdue.edu>"
+SPDX-PackageDownloadLocation = "https://github.com/schmidtw/arc"
+
+[[annotations]]
+path = ".golangci.yml"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "SPDX-FileCopyrightText: 2026 Weston Schmidt <weston_schmidt@alumni.purdue.edu>"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = "go.mod"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "SPDX-FileCopyrightText: 2026 Weston Schmidt <weston_schmidt@alumni.purdue.edu>"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = "go.sum"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "SPDX-FileCopyrightText: 2026 Weston Schmidt <weston_schmidt@alumni.purdue.edu>"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ".gitignore"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "SPDX-FileCopyrightText: 2026 Weston Schmidt <weston_schmidt@alumni.purdue.edu>"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = "**.md"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "SPDX-FileCopyrightText: 2026 Weston Schmidt <weston_schmidt@alumni.purdue.edu>"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]                                                                          
+path = "testdata/arc-draft-*-tests.yml"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "SPDX-FileCopyrightText: 2017 ValiMail Inc."
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = "testdata/rfc8617-appendix-b.eml"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "SPDX-FileCopyrightText: 2019 IETF Trust"
+SPDX-License-Identifier = "BSD-3-Clause"
