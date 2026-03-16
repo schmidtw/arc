@@ -238,6 +238,7 @@ func NewSigner(key crypto.Signer, domainKey string, opts ...SignerOption) (*Sign
 	s.validator = NewValidator(
 		WithResolver(s.resolver),
 		minRSAKeyBits{bits: s.minBits},
+		WithMaxArcSets(s.maxArcSets),
 	)
 
 	// Infer algorithm from key type.
@@ -273,6 +274,9 @@ func WithTimestamp(ts time.Time) SignerOption {
 // ARC-Authentication-Results header. This identifies the organization
 // that performed authentication checks on the message.
 // If not set, defaults to the signing domain.
+//
+// See https://www.rfc-editor.org/rfc/rfc8601#section-2.5 for guidance
+// on choosing an appropriate value.
 func WithAuthServID(id string) SignerOption {
 	return signerOptionFunc(func(s *Signer) {
 		s.authServID = id
