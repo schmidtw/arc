@@ -117,7 +117,7 @@ func validateStructure(sets []*arcSet) error {
 // lookupKey retrieves the public key for the given domain and selector
 // via DNS TXT record lookup.
 func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (crypto.PublicKey, error) {
-	domainKey := selector + "._domainkey." + domain
+	domainKey := makeDomainkey(selector, domain)
 	records, err := v.resolver.LookupTXT(ctx, domainKey)
 	if err != nil {
 		return nil, fmt.Errorf("DNS lookup for %q: %w", domainKey, err)

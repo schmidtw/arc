@@ -60,9 +60,7 @@ import (
 	"context"
 	"crypto"
 	"errors"
-	"fmt"
 	"net"
-	"strings"
 	"time"
 )
 
@@ -220,15 +218,10 @@ func NewSigner(key crypto.Signer, domainKey string, opts ...SignerOption) (*Sign
 	}
 
 	// Parse "<selector>._domainkey.<domain>" from the FQDN.
-	const marker = "._domainkey."
-	idx := strings.Index(domainKey, marker)
-	if idx <= 0 {
-		return nil, fmt.Errorf("invalid domain key %q: must be in the form <selector>._domainkey.<domain>", domainKey)
-	}
-	s.selector = domainKey[:idx]
-	s.domain = domainKey[idx+len(marker):]
-	if s.domain == "" {
-		return nil, fmt.Errorf("invalid domain key %q: domain is empty", domainKey)
+	var err error
+	s.selector, s.domain, err = splitDomainkey(domainKey)
+	if err != nil {
+		return nil, err
 	}
 
 	if s.authServID == "" {
