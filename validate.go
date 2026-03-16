@@ -49,8 +49,8 @@ func (v *Validator) validateMessage(ctx context.Context, msg *message) (chainSta
 	n := len(sets)
 
 	// Step 1: Check max instance limit.
-	if n > MaxInstance {
-		return chainFail, fmt.Errorf("instance count %d exceeds maximum %d", n, MaxInstance)
+	if n > v.maxArcSets {
+		return chainFail, fmt.Errorf("instance count %d exceeds maximum %d", n, v.maxArcSets)
 	}
 
 	// Step 2: If the highest instance is already marked as failing, result is fail.

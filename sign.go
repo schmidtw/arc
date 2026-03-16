@@ -41,8 +41,8 @@ func (s *Signer) signMessage(ctx context.Context, msg *message, authResults stri
 
 	// Determine new instance number.
 	newInstance := len(sets) + 1
-	if newInstance > MaxInstance {
-		return nil, fmt.Errorf("instance limit reached (%d)", MaxInstance)
+	if newInstance > s.maxArcSets {
+		return nil, fmt.Errorf("instance limit reached (%d)", s.maxArcSets)
 	}
 
 	// Check existing chain status.

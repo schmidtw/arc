@@ -79,9 +79,6 @@ const (
 	chainFail chainStatus = "fail"
 )
 
-// MaxInstance is the maximum number of ARC Sets allowed per message.
-const MaxInstance = 50
-
 // aar represents a parsed ARC-Authentication-Results header field.
 type aar struct {
 	Instance   int    // Instance number (1-50)
@@ -136,8 +133,9 @@ type ValidatorOption interface {
 
 // Validator validates ARC chains on email messages.
 type Validator struct {
-	resolver Resolver
-	minBits  int
+	resolver   Resolver
+	minBits    int
+	maxArcSets int
 }
 
 // NewValidator creates a new Validator. If no [Resolver] is provided via
@@ -149,6 +147,7 @@ func NewValidator(opts ...ValidatorOption) *Validator {
 	defaults := []ValidatorOption{ // nolint:prealloc
 		WithMinRSAKeyBits(1024),
 		WithResolver(net.DefaultResolver),
+		WithMaxArcSets(50),
 	}
 	opts = append(defaults, opts...)
 
@@ -168,6 +167,7 @@ type Signer struct {
 	headers    []HeaderField
 	algorithm  string
 	minBits    int
+	maxArcSets int
 	hashOpt    crypto.SignerOpts
 	timestamp  time.Time
 	resolver   Resolver
@@ -211,6 +211,7 @@ func NewSigner(key crypto.Signer, domainKey string, opts ...SignerOption) (*Sign
 		WithMinRSAKeyBits(2048),
 		WithSignedHeaders(defaultSignedHeaders...),
 		WithResolver(net.DefaultResolver),
+		WithMaxArcSets(50),
 	}
 	opts = append(defaults, opts...)
 
@@ -323,4 +324,22 @@ func (o minRSAKeyBits) applyValidator(v *Validator) {
 // https://www.rfc-editor.org/rfc/rfc6376#section-3.3.3 for details.
 func WithMinRSAKeyBits(bits int) Option {
 	return minRSAKeyBits{bits: bits}
+}
+
+type maxArcSets struct {
+	max int
+}
+
+func (o maxArcSets) applySigner(s *Signer) {
+	s.maxArcSets = o.max
+}
+
+func (o maxArcSets) applyValidator(v *Validator) {
+	v.maxArcSets = o.max
+}
+
+// WithMaxArcSets sets the maximum number of ARC Sets allowed in a message.
+// This option can be passed to both [NewValidator] and [NewSigner].
+func WithMaxArcSets(max int) Option {
+	return maxArcSets{max: max}
 }
