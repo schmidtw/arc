@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"context"
 	"crypto"
+	"crypto/ed25519"
+	"crypto/rsa"
 	"fmt"
 	"io"
 	"strings"
@@ -126,7 +128,22 @@ func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (cry
 	}
 
 	record := strings.Join(records, "")
-	return ParseKeyRecord(record)
+	key, err := ParseKeyRecord(record)
+	if err != nil {
+		return nil, fmt.Errorf("parsing key record for %q: %w", domainKey, err)
+	}
+
+	switch k := key.(type) {
+	case *rsa.PublicKey:
+		if k.N.BitLen() < v.minBits {
+			return nil, fmt.Errorf("RSA key too small: %d bits (minimum %d)", k.N.BitLen(), v.minBits)
+		}
+	case ed25519.PublicKey:
+		// No size requirement for Ed25519 keys.
+	default:
+		return nil, fmt.Errorf("unsupported key type %T for %q", key, domainKey)
+	}
+	return key, nil
 }
 
 // verifyAMS verifies an ARC-Message-Signature by checking the body hash

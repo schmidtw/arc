@@ -183,7 +183,7 @@ func TestRSAWeakKeyRejected(t *testing.T) {
 		key.N = new(big.Int).SetInt64(1) // 1-bit modulus
 		key.E = 65537
 
-		_, _, err := algorithmForKey(key)
+		_, _, err := algorithmForKey(key, 1024)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "RSA key too small")
 	})

@@ -188,6 +188,7 @@ func TestEndToEndSignThenValidate(t *testing.T) {
 		WithSignedHeaders(HeaderFrom, HeaderTo, HeaderSubject),
 		WithTimestamp(time.Unix(1234567890, 0)),
 		WithResolver(resolver),
+		WithMinRSAKeyBits(1024),
 	)
 	require.NoError(t, err)
 
@@ -204,6 +205,7 @@ func TestEndToEndSignThenValidate(t *testing.T) {
 		WithSignedHeaders(HeaderFrom, HeaderTo, HeaderSubject),
 		WithTimestamp(time.Unix(1234567900, 0)),
 		WithResolver(resolver),
+		WithMinRSAKeyBits(1024),
 	)
 	require.NoError(t, err)
 

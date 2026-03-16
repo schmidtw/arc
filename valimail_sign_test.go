@@ -97,6 +97,7 @@ func TestValimailSignSuite(t *testing.T) {
 					WithSignedHeaders(sigHeaders...),
 					WithTimestamp(time.Unix(tc.T, 0)),
 					WithResolver(resolver),
+					WithMinRSAKeyBits(1024),
 				)
 				require.NoError(t, err)
 
@@ -124,6 +125,7 @@ func testSignRefused(t *testing.T, tc valimailSignTC, privKey crypto.Signer, dom
 		WithSignedHeaders(sigHeaders...),
 		WithTimestamp(time.Unix(tc.T, 0)),
 		WithResolver(resolver),
+		WithMinRSAKeyBits(1024),
 	)
 	require.NoError(t, err)
 

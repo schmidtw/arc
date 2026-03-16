@@ -27,7 +27,7 @@ func (m *mapResolver) LookupTXT(_ context.Context, name string) ([]string, error
 
 // sign wraps the Signer.sign method for test convenience.
 func sign(key crypto.Signer, algorithm string, data []byte) ([]byte, error) {
-	_, hashOpt, err := algorithmForKey(key)
+	_, hashOpt, err := algorithmForKey(key, 1024)
 	if err != nil {
 		return nil, err
 	}

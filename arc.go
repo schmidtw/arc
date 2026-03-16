@@ -137,18 +137,25 @@ type ValidatorOption interface {
 // Validator validates ARC chains on email messages.
 type Validator struct {
 	resolver Resolver
+	minBits  int
 }
 
 // NewValidator creates a new Validator. If no [Resolver] is provided via
-// [WithResolver], [net.DefaultResolver] is used.
+// [WithResolver], [net.DefaultResolver] is used.  By default, the minimum
+// accepted RSA key size is 1024 bits. Use [WithMinRSAKeyBits] to override.
 func NewValidator(opts ...ValidatorOption) *Validator {
 	v := Validator{}
+
+	defaults := []ValidatorOption{ // nolint:prealloc
+		WithMinRSAKeyBits(1024),
+		WithResolver(net.DefaultResolver),
+	}
+	opts = append(defaults, opts...)
+
 	for _, opt := range opts {
 		opt.applyValidator(&v)
 	}
-	if v.resolver == nil {
-		v.resolver = net.DefaultResolver
-	}
+
 	return &v
 }
 
@@ -160,6 +167,7 @@ type Signer struct {
 	authServID string
 	headers    []HeaderField
 	algorithm  string
+	minBits    int
 	hashOpt    crypto.SignerOpts
 	timestamp  time.Time
 	resolver   Resolver
@@ -179,7 +187,7 @@ func (f signerOptionFunc) applySigner(s *Signer) { f(s) }
 // NewSigner creates a new Signer with the given key and domain key FQDN.
 //
 // The key is the private key used for signing. The signing algorithm is
-// inferred from the key type (RSA-SHA256 or Ed25519-SHA256).
+// inferred from the key type (RSA or Ed25519).
 //
 // The domainKey is the DNS domain key FQDN where verifiers look up the
 // corresponding public key:
@@ -192,11 +200,20 @@ func (f signerOptionFunc) applySigner(s *Signer) { f(s) }
 // headers (From, To, Subject, Date, etc.). Use [WithSignedHeaders] to override
 // this set. If no authentication server ID is set via [WithAuthServID], it
 // defaults to the domain. If no resolver is set, [net.DefaultResolver] is used.
+// By default, the minimum accepted RSA key size is 2048 bits for signing and
+// 1024 bits for validation. Use [WithMinRSAKeyBits] to override these defaults.
 func NewSigner(key crypto.Signer, domainKey string, opts ...SignerOption) (*Signer, error) {
 	s := Signer{
-		key:     key,
-		headers: append([]HeaderField{}, defaultSignedHeaders...),
+		key: key,
 	}
+
+	defaults := []SignerOption{ // nolint:prealloc
+		WithMinRSAKeyBits(2048),
+		WithSignedHeaders(defaultSignedHeaders...),
+		WithResolver(net.DefaultResolver),
+	}
+	opts = append(defaults, opts...)
+
 	for _, opt := range opts {
 		opt.applySigner(&s)
 	}
@@ -216,13 +233,14 @@ func NewSigner(key crypto.Signer, domainKey string, opts ...SignerOption) (*Sign
 	if s.authServID == "" {
 		s.authServID = s.domain
 	}
-	if s.resolver == nil {
-		s.resolver = net.DefaultResolver
-	}
-	s.validator = NewValidator(WithResolver(s.resolver))
+
+	s.validator = NewValidator(
+		WithResolver(s.resolver),
+		minRSAKeyBits{bits: s.minBits},
+	)
 
 	// Infer algorithm from key type.
-	algo, hashOpt, err := algorithmForKey(key)
+	algo, hashOpt, err := algorithmForKey(key, s.minBits)
 	if err != nil {
 		return nil, err
 	}
@@ -279,4 +297,30 @@ func (o resolverOption) applyValidator(v *Validator) { v.resolver = o.resolver }
 // to both [NewValidator] and [NewSigner].
 func WithResolver(r Resolver) Option {
 	return resolverOption{resolver: r}
+}
+
+type minRSAKeyBits struct {
+	bits int
+}
+
+func (o minRSAKeyBits) applySigner(s *Signer) {
+	s.minBits = o.bits
+}
+
+func (o minRSAKeyBits) applyValidator(v *Validator) {
+	v.minBits = o.bits
+}
+
+// WithMinRSAKeyBits sets the minimum accepted RSA key size in bits. This
+// option can be passed to both [NewValidator] and [NewSigner].
+//
+// Defaults are chosen per RFC 8301 (which updates RFC 6376 Section 3.3.3):
+//   - [NewValidator]: 1024 bits — verifiers MUST accept 1024-bit to 4096-bit keys
+//   - [NewSigner]: 2048 bits — signers MUST use at least 1024 bits and SHOULD
+//     use 2048 bits
+//
+// See https://www.rfc-editor.org/rfc/rfc8301 and
+// https://www.rfc-editor.org/rfc/rfc6376#section-3.3.3 for details.
+func WithMinRSAKeyBits(bits int) Option {
+	return minRSAKeyBits{bits: bits}
 }
