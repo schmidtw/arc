@@ -9,7 +9,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 )
 
@@ -17,31 +16,6 @@ import (
 func (s *Signer) sign(data []byte) ([]byte, error) {
 	hash := sha256.Sum256(data)
 	return s.key.Sign(rand.Reader, hash[:], s.hashOpt)
-}
-
-// verify checks a signature over the given data using the provided public key
-// and algorithm.
-func verify(pubKey crypto.PublicKey, algorithm string, data, signature []byte) error {
-	hash := sha256.Sum256(data)
-
-	switch pubKey := pubKey.(type) {
-	case *rsa.PublicKey:
-		if algorithm != algRSASHA256 {
-			return fmt.Errorf("algorithm mismatch: expected %s, got %s", algRSASHA256, algorithm)
-		}
-		if err := rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, hash[:], signature); err != nil {
-			return errors.Join(ErrInvalidSignature, err)
-		}
-	case ed25519.PublicKey:
-		if algorithm != algEd25519SHA256 {
-			return fmt.Errorf("algorithm mismatch: expected %s, got %s", algEd25519SHA256, algorithm)
-		}
-		if !ed25519.Verify(pubKey, hash[:], signature) {
-			return errors.Join(ErrInvalidSignature, fmt.Errorf("ed25519 signature verification failed"))
-		}
-	}
-
-	return nil
 }
 
 // algorithmForKey returns the signing algorithm and hash option for the given key type.

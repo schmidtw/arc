@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-// ParseKeyRecord parses a public key from a DKIM DNS TXT record value.
+// parseKeyRecord parses a public key from a DKIM DNS TXT record value.
 // The record is a semicolon-delimited tag-value list as defined by RFC 6376
 // Section 3.6.1. A typical record looks like:
 //
@@ -23,7 +23,7 @@ import (
 // ([ed25519.PublicKey]). If the key type tag (k=) is absent, RSA is assumed.
 // An empty public key tag (p=) indicates the key has been revoked and
 // returns an error.
-func ParseKeyRecord(record string) (crypto.PublicKey, error) {
+func parseKeyRecord(record string) (crypto.PublicKey, error) {
 	tl, err := parseTagList(record)
 	if err != nil {
 		return nil, fmt.Errorf("parsing key record: %w", err)

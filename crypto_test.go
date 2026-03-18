@@ -8,12 +8,48 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
+	"errors"
+	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// newVerifyFunc creates a verifyFunc from a public key, mirroring the closures
+// built by lookupKey. This lets unit tests exercise sign+verify without DNS.
+func newVerifyFunc(t *testing.T, pubKey crypto.PublicKey) verifyFunc {
+	t.Helper()
+	switch k := pubKey.(type) {
+	case *rsa.PublicKey:
+		return func(algorithm string, data, signature []byte) error {
+			if algorithm != algRSASHA256 {
+				return fmt.Errorf("algorithm mismatch: expected %s, got %s", algRSASHA256, algorithm)
+			}
+			hash := sha256.Sum256(data)
+			if err := rsa.VerifyPKCS1v15(k, crypto.SHA256, hash[:], signature); err != nil {
+				return errors.Join(ErrInvalidSignature, err)
+			}
+			return nil
+		}
+	case ed25519.PublicKey:
+		return func(algorithm string, data, signature []byte) error {
+			if algorithm != algEd25519SHA256 {
+				return fmt.Errorf("algorithm mismatch: expected %s, got %s", algEd25519SHA256, algorithm)
+			}
+			hash := sha256.Sum256(data)
+			if !ed25519.Verify(k, hash[:], signature) {
+				return errors.Join(ErrInvalidSignature, fmt.Errorf("ed25519 signature verification failed"))
+			}
+			return nil
+		}
+	default:
+		t.Fatalf("unsupported public key type: %T", pubKey)
+		return nil
+	}
+}
 
 func TestSignAndVerify(t *testing.T) {
 	tests := []struct {
@@ -67,7 +103,8 @@ func TestSignAndVerify(t *testing.T) {
 			sig, err := s.sign(data)
 			require.NoError(t, err)
 
-			require.NoError(t, verify(pubKey, tt.algorithm, data, sig))
+			verify := newVerifyFunc(t, pubKey)
+			require.NoError(t, verify(tt.algorithm, data, sig))
 		})
 	}
 }
@@ -148,7 +185,8 @@ func TestSignatureVerificationFailures(t *testing.T) {
 				sig[0] ^= 0xFF
 			}
 
-			err = verify(pubKey, tt.algorithm, tt.verifyData, sig)
+			verify := newVerifyFunc(t, pubKey)
+			err = verify(tt.algorithm, tt.verifyData, sig)
 			if tt.expectFailure {
 				require.Error(t, err)
 				assert.ErrorIs(t, err, ErrInvalidSignature)
@@ -172,7 +210,9 @@ func TestRSAWeakKeyRejected(t *testing.T) {
 		}
 		sig, err := s.sign(data)
 		require.NoError(t, err)
-		require.NoError(t, verify(&key.PublicKey, algRSASHA256, data, sig))
+
+		verify := newVerifyFunc(t, &key.PublicKey)
+		require.NoError(t, verify(algRSASHA256, data, sig))
 	})
 
 	t.Run("small key rejected by algorithmForKey", func(t *testing.T) {
@@ -204,7 +244,8 @@ func TestAlgorithmValidation(t *testing.T) {
 		sig, err := s.sign(data)
 		require.NoError(t, err)
 
-		err = verify(&key.PublicKey, "rsa-sha1", data, sig)
+		verify := newVerifyFunc(t, &key.PublicKey)
+		err = verify("rsa-sha1", data, sig)
 		require.Error(t, err)
 	})
 }

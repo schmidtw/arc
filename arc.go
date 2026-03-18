@@ -61,6 +61,7 @@ import (
 	"crypto"
 	"errors"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -134,13 +135,24 @@ type Validator struct {
 	resolver   Resolver
 	minBits    int
 	maxArcSets int
+	sigCache   map[string]txtKey
+	m          sync.Mutex
+}
+
+type verifyFunc func(algorithm string, data, signature []byte) error
+
+type txtKey struct {
+	txt    string
+	verify verifyFunc
 }
 
 // NewValidator creates a new Validator. If no [Resolver] is provided via
 // [WithResolver], [net.DefaultResolver] is used.  By default, the minimum
 // accepted RSA key size is 1024 bits. Use [WithMinRSAKeyBits] to override.
 func NewValidator(opts ...ValidatorOption) *Validator {
-	v := Validator{}
+	v := Validator{
+		sigCache: make(map[string]txtKey),
+	}
 
 	defaults := []ValidatorOption{ // nolint:prealloc
 		WithMinRSAKeyBits(1024),

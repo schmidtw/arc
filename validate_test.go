@@ -9,6 +9,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -189,6 +190,143 @@ func buildSignedMessage(t *testing.T, key *rsa.PrivateKey, domain, selector stri
 	result.WriteString(bodyContent)
 
 	return result.String()
+}
+
+func TestValidatorMinRSAKeyBits(t *testing.T) {
+	tests := []struct {
+		name       string
+		keySize    int
+		minBits    int
+		shouldPass bool
+	}{
+		{
+			name:       "1024-bit key with min=1024 should pass",
+			keySize:    1024,
+			minBits:    1024,
+			shouldPass: true,
+		},
+		{
+			name:       "2048-bit key with min=1024 should pass",
+			keySize:    2048,
+			minBits:    1024,
+			shouldPass: true,
+		},
+		{
+			name:       "1024-bit key with min=2048 should fail",
+			keySize:    1024,
+			minBits:    2048,
+			shouldPass: false,
+		},
+		{
+			name:       "2048-bit key with min=2048 should pass",
+			keySize:    2048,
+			minBits:    2048,
+			shouldPass: true,
+		},
+		{
+			name:       "4096-bit key with min=2048 should pass",
+			keySize:    4096,
+			minBits:    2048,
+			shouldPass: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Generate a key of the specified size.
+			key, err := rsa.GenerateKey(rand.Reader, tt.keySize)
+			require.NoError(t, err)
+
+			// Create resolver with the public key.
+			resolver := &mapResolver{
+				records: map[string]string{
+					"sel._domainkey.example.org": encodeDKIMRecord(t, &key.PublicKey),
+				},
+			}
+
+			// Create a signed message with this key.
+			msg := buildSignedMessage(t, key, "example.org", "sel", 1)
+
+			// Validate with the specified minBits.
+			v := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(tt.minBits))
+			present, err := v.Validate(context.Background(), strings.NewReader(msg))
+			assert.True(t, present)
+
+			if tt.shouldPass {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "RSA key too small")
+			}
+		})
+	}
+}
+
+func TestValidatorDefaultMinBits(t *testing.T) {
+	// Test that the default minimum is 1024 bits.
+	key, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // Testing weak keys
+	require.NoError(t, err)
+
+	resolver := &mapResolver{
+		records: map[string]string{
+			"sel._domainkey.example.org": encodeDKIMRecord(t, &key.PublicKey),
+		},
+	}
+
+	msg := buildSignedMessage(t, key, "example.org", "sel", 1)
+
+	v := NewValidator(WithResolver(resolver)) // No explicit minBits
+	present, err := v.Validate(context.Background(), strings.NewReader(msg))
+	assert.True(t, present)
+	require.NoError(t, err, "default should accept 1024-bit keys")
+}
+
+func TestValidatorMaxArcSets(t *testing.T) {
+	resolver := &mapResolver{records: map[string]string{}}
+
+	t.Run("exceeds max", func(t *testing.T) {
+		// Build a message with 3 ARC sets.
+		var headers strings.Builder
+		for i := 1; i <= 3; i++ {
+			cv := "none"
+			if i > 1 {
+				cv = "pass"
+			}
+			fmt.Fprintf(&headers, "ARC-Seal: i=%d; a=rsa-sha256; cv=%s; d=example.org; s=sel; t=12345; b=dGVzdA==\r\n", i, cv)
+			fmt.Fprintf(&headers, "ARC-Message-Signature: i=%d; a=rsa-sha256; c=relaxed/relaxed; d=example.org; h=from; s=sel; t=12345; bh=dGVzdA==; b=dGVzdA==\r\n", i)
+			fmt.Fprintf(&headers, "ARC-Authentication-Results: i=%d; example.org; spf=pass\r\n", i)
+		}
+		msg := headers.String() + "From: test@example.com\r\n\r\nBody.\r\n"
+
+		v := NewValidator(WithResolver(resolver), WithMaxArcSets(2))
+		present, err := v.Validate(context.Background(), strings.NewReader(msg))
+		assert.True(t, present)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "exceeds maximum")
+	})
+
+	t.Run("within max", func(t *testing.T) {
+		// Build a message with 2 ARC sets.
+		var headers strings.Builder
+		for i := 1; i <= 2; i++ {
+			cv := "none"
+			if i > 1 {
+				cv = "pass"
+			}
+			fmt.Fprintf(&headers, "ARC-Seal: i=%d; a=rsa-sha256; cv=%s; d=example.org; s=sel; t=12345; b=dGVzdA==\r\n", i, cv)
+			fmt.Fprintf(&headers, "ARC-Message-Signature: i=%d; a=rsa-sha256; c=relaxed/relaxed; d=example.org; h=from; s=sel; t=12345; bh=dGVzdA==; b=dGVzdA==\r\n", i)
+			fmt.Fprintf(&headers, "ARC-Authentication-Results: i=%d; example.org; spf=pass\r\n", i)
+		}
+		msg := headers.String() + "From: test@example.com\r\n\r\nBody.\r\n"
+
+		v := NewValidator(WithResolver(resolver), WithMaxArcSets(2))
+		present, err := v.Validate(context.Background(), strings.NewReader(msg))
+		assert.True(t, present)
+		// Will fail later (signature verification), but not on instance count.
+		if err != nil {
+			assert.NotContains(t, err.Error(), "exceeds maximum")
+		}
+	})
 }
 
 func TestRFC8617AppendixB(t *testing.T) {

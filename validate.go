@@ -9,6 +9,8 @@ import (
 	"crypto"
 	"crypto/ed25519"
 	"crypto/rsa"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -116,7 +118,7 @@ func validateStructure(sets []*arcSet) error {
 
 // lookupKey retrieves the public key for the given domain and selector
 // via DNS TXT record lookup.
-func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (crypto.PublicKey, error) {
+func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (verifyFunc, error) {
 	domainKey := makeDomainkey(selector, domain)
 	records, err := v.resolver.LookupTXT(ctx, domainKey)
 	if err != nil {
@@ -128,7 +130,22 @@ func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (cry
 	}
 
 	record := strings.Join(records, "")
-	key, err := ParseKeyRecord(record)
+	v.m.Lock()
+	defer v.m.Unlock()
+
+	if cached, ok := v.sigCache[domainKey]; ok {
+		if cached.txt == record {
+			// Cache hit: use previously parsed key.
+			return cached.verify, nil
+		}
+		// Cache miss: record changed since last lookup. Remove old cache entry.
+		delete(v.sigCache, domainKey)
+	}
+
+	info := txtKey{
+		txt: record,
+	}
+	key, err := parseKeyRecord(record)
 	if err != nil {
 		return nil, fmt.Errorf("parsing key record for %q: %w", domainKey, err)
 	}
@@ -138,19 +155,45 @@ func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (cry
 		if k.N.BitLen() < v.minBits {
 			return nil, fmt.Errorf("RSA key too small: %d bits (minimum %d)", k.N.BitLen(), v.minBits)
 		}
+		info.verify = func(algorithm string, data, signature []byte) error {
+			if algorithm != algRSASHA256 {
+				return fmt.Errorf("algorithm mismatch: expected %s, got %s", algRSASHA256, algorithm)
+			}
+
+			hash := sha256.Sum256(data)
+			if err := rsa.VerifyPKCS1v15(k, crypto.SHA256, hash[:], signature); err != nil {
+				return errors.Join(ErrInvalidSignature, err)
+			}
+			return nil
+		}
 	case ed25519.PublicKey:
 		// No size requirement for Ed25519 keys.
+		info.verify = func(algorithm string, data, signature []byte) error {
+			if algorithm != algEd25519SHA256 {
+				return fmt.Errorf("algorithm mismatch: expected %s, got %s", algEd25519SHA256, algorithm)
+			}
+
+			hash := sha256.Sum256(data)
+			if !ed25519.Verify(k, hash[:], signature) {
+				return errors.Join(ErrInvalidSignature,
+					fmt.Errorf("ed25519 signature verification failed"))
+			}
+			return nil
+		}
 	default:
 		return nil, fmt.Errorf("unsupported key type %T for %q", key, domainKey)
 	}
-	return key, nil
+
+	v.sigCache[domainKey] = info
+
+	return info.verify, nil
 }
 
 // verifyAMS verifies an ARC-Message-Signature by checking the body hash
 // and verifying the cryptographic signature against the DNS public key.
 func (v *Validator) verifyAMS(ctx context.Context, msg *message, ams *ams) error {
 	// Look up the public key.
-	pk, err := v.lookupKey(ctx, ams.Domain, ams.Selector)
+	verify, err := v.lookupKey(ctx, ams.Domain, ams.Selector)
 	if err != nil {
 		return fmt.Errorf("key lookup for AMS i=%d: %w", ams.Instance, err)
 	}
@@ -164,7 +207,7 @@ func (v *Validator) verifyAMS(ctx context.Context, msg *message, ams *ams) error
 	// Build the data to verify: canonicalized signed headers + the AMS header.
 	data := buildAMSSignedData(msg, ams)
 
-	return verify(pk, ams.Algorithm, data, ams.Signature)
+	return verify(ams.Algorithm, data, ams.Signature)
 }
 
 // buildAMSSignedData builds the data that was signed by the ARC-Message-Signature.
@@ -206,14 +249,14 @@ func buildAMSSignedData(msg *message, ams *ams) []byte {
 func (v *Validator) verifyAS(ctx context.Context, msg *message, sets []*arcSet, idx int) error {
 	as := sets[idx].Seal
 
-	pk, err := v.lookupKey(ctx, as.Domain, as.Selector)
+	verify, err := v.lookupKey(ctx, as.Domain, as.Selector)
 	if err != nil {
 		return fmt.Errorf("key lookup for AS i=%d: %w", as.Instance, err)
 	}
 
 	data := buildASSignedData(msg, sets, idx)
 
-	return verify(pk, as.Algorithm, data, as.Signature)
+	return verify(as.Algorithm, data, as.Signature)
 }
 
 // buildASSignedData builds the data that was signed by the ARC-Seal at index idx.
