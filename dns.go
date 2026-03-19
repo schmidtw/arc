@@ -8,7 +8,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/base64"
 	"fmt"
 	"strings"
 )
@@ -24,22 +23,20 @@ import (
 // An empty public key tag (p=) indicates the key has been revoked and
 // returns an error.
 func parseKeyRecord(record string) (crypto.PublicKey, error) {
-	tl, err := parseTagList(record)
+	tags, err := parseKeyRecordTags(record)
 	if err != nil {
 		return nil, fmt.Errorf("parsing key record: %w", err)
 	}
 
 	// Check version if present.
-	if v, ok := tl.Get("v"); ok {
-		if strings.TrimSpace(v) != "DKIM1" {
-			return nil, fmt.Errorf("unsupported key record version: %q", v)
-		}
+	if tags.Version != "" && strings.TrimSpace(tags.Version) != "DKIM1" {
+		return nil, fmt.Errorf("unsupported key record version: %q", tags.Version)
 	}
 
 	// If the key record restricts hash algorithms, SHA-256 must be listed
 	// since it's the only hash algorithm we support.
-	if h, ok := tl.Get("h"); ok {
-		hashes := strings.Split(h, ":")
+	if tags.Hash != "" {
+		hashes := strings.Split(tags.Hash, ":")
 		found := false
 		for _, hash := range hashes {
 			if strings.TrimSpace(hash) == hashSHA256 {
@@ -48,40 +45,12 @@ func parseKeyRecord(record string) (crypto.PublicKey, error) {
 			}
 		}
 		if !found {
-			return nil, fmt.Errorf("key record h= tag %q does not include sha256", h)
+			return nil, fmt.Errorf("key record h= tag %q does not include sha256", tags.Hash)
 		}
 	}
 
-	// Get key type, default to RSA.
-	keyType := algoRSA
-	if k, ok := tl.Get("k"); ok {
-		keyType = strings.TrimSpace(k)
-	}
-
-	// Get public key data.
-	pVal, err := tl.Require("p")
-	if err != nil {
-		return nil, fmt.Errorf("key record missing p= tag: %w", err)
-	}
-	pVal = strings.TrimSpace(pVal)
-
-	// Empty p= means revoked key.
-	if pVal == "" {
-		return nil, fmt.Errorf("key has been revoked (empty p= tag)")
-	}
-
-	// Remove whitespace from base64.
-	pVal = strings.Map(func(r rune) rune {
-		if r == ' ' || r == '\t' || r == '\r' || r == '\n' {
-			return -1
-		}
-		return r
-	}, pVal)
-
-	keyData, err := base64.StdEncoding.DecodeString(pVal)
-	if err != nil {
-		return nil, fmt.Errorf("decoding public key: %w", err)
-	}
+	keyType := strings.TrimSpace(tags.KeyType)
+	keyData := tags.PubKey
 
 	switch keyType {
 	case algoRSA:

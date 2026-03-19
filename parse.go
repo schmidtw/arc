@@ -4,11 +4,9 @@
 package arc
 
 import (
-	"encoding/base64"
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // parseInstance extracts and validates the instance value from a tag list.
@@ -25,31 +23,6 @@ func parseInstance(tl tagList) (int, error) {
 		return 0, fmt.Errorf("instance value %d out of range [1, 50]", i)
 	}
 	return i, nil
-}
-
-// parseTimestamp parses a timestamp tag value (Unix seconds).
-func parseTimestamp(tl tagList) (time.Time, error) {
-	tStr, ok := tl.Get("t")
-	if !ok {
-		return time.Time{}, nil
-	}
-	ts, err := strconv.ParseInt(strings.TrimSpace(tStr), 10, 64)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid timestamp %q: %w", tStr, err)
-	}
-	return time.Unix(ts, 0), nil
-}
-
-// decodeBase64Tag decodes a base64-encoded tag value, ignoring whitespace.
-func decodeBase64Tag(val string) ([]byte, error) {
-	// Remove all whitespace (folding whitespace is allowed in base64 values).
-	cleaned := strings.Map(func(r rune) rune {
-		if r == ' ' || r == '\t' || r == '\r' || r == '\n' {
-			return -1
-		}
-		return r
-	}, val)
-	return base64.StdEncoding.DecodeString(cleaned)
 }
 
 // parseAAR parses an ARC-Authentication-Results header field value.
@@ -102,81 +75,30 @@ func parseAAR(raw string) (*aar, error) {
 func parseAMS(raw string) (*ams, error) {
 	val := unfoldHeader(raw)
 
-	tl, err := parseTagList(val)
+	tags, err := parseAMSTags(val)
 	if err != nil {
 		return nil, fmt.Errorf("parsing AMS: %w", err)
-	}
-
-	instance, err := parseInstance(tl)
-	if err != nil {
-		return nil, err
-	}
-
-	algo, err := tl.Require("a")
-	if err != nil {
-		return nil, fmt.Errorf("AMS missing algorithm: %w", err)
-	}
-
-	bVal, err := tl.Require("b")
-	if err != nil {
-		return nil, fmt.Errorf("AMS missing signature: %w", err)
-	}
-	sig, err := decodeBase64Tag(bVal)
-	if err != nil {
-		return nil, fmt.Errorf("AMS invalid signature encoding: %w", err)
-	}
-
-	bhVal, err := tl.Require("bh")
-	if err != nil {
-		return nil, fmt.Errorf("AMS missing body hash: %w", err)
-	}
-	bh, err := decodeBase64Tag(bhVal)
-	if err != nil {
-		return nil, fmt.Errorf("AMS invalid body hash encoding: %w", err)
-	}
-
-	domain, err := tl.Require("d")
-	if err != nil {
-		return nil, fmt.Errorf("AMS missing domain: %w", err)
-	}
-
-	hVal, err := tl.Require("h")
-	if err != nil {
-		return nil, fmt.Errorf("AMS missing headers: %w", err)
-	}
-	headers := parseHeaderList(hVal)
-
-	selector, err := tl.Require("s")
-	if err != nil {
-		return nil, fmt.Errorf("AMS missing selector: %w", err)
 	}
 
 	// Validate canonicalization. We only support relaxed/relaxed. Per DKIM
 	// (RFC 6376 Section 3.5), the default when c= is absent is simple/simple,
 	// which we do not implement.
-	cVal, hasC := tl.Get("c")
-	if !hasC {
-		return nil, fmt.Errorf("AMS missing canonicalization (c= tag)")
-	}
-	cVal = strings.TrimSpace(cVal)
+	cVal := strings.TrimSpace(tags.Canon)
 	if cVal != "relaxed/relaxed" {
 		return nil, fmt.Errorf("AMS unsupported canonicalization %q: only relaxed/relaxed is supported", cVal)
 	}
 
-	ts, err := parseTimestamp(tl)
-	if err != nil {
-		return nil, err
-	}
+	headers := parseHeaderList(tags.Headers)
 
 	return &ams{
-		Instance:  instance,
-		Algorithm: strings.TrimSpace(algo),
-		Signature: sig,
-		BodyHash:  bh,
-		Domain:    strings.TrimSpace(domain),
+		Instance:  tags.Instance,
+		Algorithm: strings.TrimSpace(tags.Algo),
+		Signature: tags.Sig,
+		BodyHash:  tags.BodyHash,
+		Domain:    strings.TrimSpace(tags.Domain),
 		Headers:   headers,
-		Selector:  strings.TrimSpace(selector),
-		Timestamp: ts,
+		Selector:  strings.TrimSpace(tags.Selector),
+		Timestamp: tags.Time,
 		Raw:       raw,
 	}, nil
 }
@@ -185,67 +107,24 @@ func parseAMS(raw string) (*ams, error) {
 func parseArcSeal(raw string) (*arcSeal, error) {
 	val := unfoldHeader(raw)
 
-	tl, err := parseTagList(val)
+	tags, err := parseASTags(val)
 	if err != nil {
 		return nil, fmt.Errorf("parsing AS: %w", err)
 	}
 
-	instance, err := parseInstance(tl)
-	if err != nil {
-		return nil, err
-	}
-
-	algo, err := tl.Require("a")
-	if err != nil {
-		return nil, fmt.Errorf("AS missing algorithm: %w", err)
-	}
-
-	bVal, err := tl.Require("b")
-	if err != nil {
-		return nil, fmt.Errorf("AS missing signature: %w", err)
-	}
-	sig, err := decodeBase64Tag(bVal)
-	if err != nil {
-		return nil, fmt.Errorf("AS invalid signature encoding: %w", err)
-	}
-
-	cv, err := tl.Require("cv")
-	if err != nil {
-		return nil, fmt.Errorf("AS missing chain validation: %w", err)
-	}
-	cv = strings.TrimSpace(cv)
+	cv := strings.TrimSpace(tags.CV)
 	if cv != "none" && cv != "pass" && cv != "fail" {
 		return nil, fmt.Errorf("AS invalid cv value: %q", cv)
 	}
 
-	domain, err := tl.Require("d")
-	if err != nil {
-		return nil, fmt.Errorf("AS missing domain: %w", err)
-	}
-
-	selector, err := tl.Require("s")
-	if err != nil {
-		return nil, fmt.Errorf("AS missing selector: %w", err)
-	}
-
-	// The ARC-Seal must not contain a signed headers (h=) tag.
-	if _, ok := tl.Get("h"); ok {
-		return nil, fmt.Errorf("AS contains forbidden h= tag")
-	}
-
-	ts, err := parseTimestamp(tl)
-	if err != nil {
-		return nil, err
-	}
-
 	return &arcSeal{
-		Instance:        instance,
-		Algorithm:       strings.TrimSpace(algo),
-		Signature:       sig,
+		Instance:        tags.Instance,
+		Algorithm:       strings.TrimSpace(tags.Algo),
+		Signature:       tags.Sig,
 		ChainValidation: chainStatus(cv),
-		Domain:          strings.TrimSpace(domain),
-		Selector:        strings.TrimSpace(selector),
-		Timestamp:       ts,
+		Domain:          strings.TrimSpace(tags.Domain),
+		Selector:        strings.TrimSpace(tags.Selector),
+		Timestamp:       tags.Time,
 		Raw:             raw,
 	}, nil
 }
