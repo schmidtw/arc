@@ -164,10 +164,15 @@ func (v *Validator) evictLRU() {
 
 // cacheAdd adds a new entry to the cache with LRU tracking.
 func (v *Validator) cacheAdd(domainKey, record string, verify verifyFunc) {
+	// Skip caching if disabled.
+	if v.maxCacheSize == 0 {
+		return
+	}
+
 	v.evictLRU()
 
 	var element *list.Element
-	if v.maxCacheSize != 0 {
+	if v.maxCacheSize > 0 {
 		element = v.cacheList.PushFront(&cacheEntry{key: domainKey})
 	}
 
@@ -193,24 +198,26 @@ func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (ver
 
 	record := strings.Join(records, "")
 
-	// Check cache under lock.
-	v.m.Lock()
-	if cached, ok := v.sigCache[domainKey]; ok {
-		if cached.txt == record {
-			// Cache hit: move to front (most recently used) and return.
-			if cached.element != nil {
-				v.cacheList.MoveToFront(cached.element)
+	// Check cache under lock (unless caching is disabled).
+	if v.maxCacheSize != 0 {
+		v.m.Lock()
+		if cached, ok := v.sigCache[domainKey]; ok {
+			if cached.txt == record {
+				// Cache hit: move to front (most recently used) and return.
+				if cached.element != nil {
+					v.cacheList.MoveToFront(cached.element)
+				}
+				v.m.Unlock()
+				return cached.verify, nil
 			}
-			v.m.Unlock()
-			return cached.verify, nil
+			// Cache miss: record changed since last lookup. Remove old cache entry.
+			if cached.element != nil {
+				v.cacheList.Remove(cached.element)
+			}
+			delete(v.sigCache, domainKey)
 		}
-		// Cache miss: record changed since last lookup. Remove old cache entry.
-		if cached.element != nil {
-			v.cacheList.Remove(cached.element)
-		}
-		delete(v.sigCache, domainKey)
+		v.m.Unlock()
 	}
-	v.m.Unlock()
 
 	// Parse and build verifier outside lock to reduce contention.
 	key, err := parseKeyRecord(record)
@@ -223,19 +230,22 @@ func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (ver
 		return nil, err
 	}
 
-	// Store in cache with a second lock and double-check.
-	v.m.Lock()
-	defer v.m.Unlock()
+	// Store in cache with a second lock and double-check (unless caching is disabled).
+	if v.maxCacheSize != 0 {
+		v.m.Lock()
+		defer v.m.Unlock()
 
-	if cached, ok := v.sigCache[domainKey]; ok && cached.txt == record {
-		// Another goroutine beat us to it. Use their cached result.
-		if cached.element != nil {
-			v.cacheList.MoveToFront(cached.element)
+		if cached, ok := v.sigCache[domainKey]; ok && cached.txt == record {
+			// Another goroutine beat us to it. Use their cached result.
+			if cached.element != nil {
+				v.cacheList.MoveToFront(cached.element)
+			}
+			return cached.verify, nil
 		}
-		return cached.verify, nil
+
+		v.cacheAdd(domainKey, record, verify)
 	}
 
-	v.cacheAdd(domainKey, record, verify)
 	return verify, nil
 }
 
