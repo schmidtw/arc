@@ -70,7 +70,9 @@ Both `NewValidator` and `NewSigner` accept `WithResolver` to supply a custom DNS
 ```go
 v := arc.NewValidator(arc.WithResolver(myResolver))
 
-s, err := arc.NewSigner(key, domainKey, arc.WithResolver(myResolver))
+s, err := arc.NewSigner(key, domainKey,
+    arc.WithValidator(v),
+    arc.WithResolver(myResolver))
 ```
 
 Any type that implements `LookupTXT(ctx context.Context, name string) ([]string, error)` satisfies the `Resolver` interface. The standard library's `*net.Resolver` works out of the box.

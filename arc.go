@@ -54,6 +54,13 @@
 // If validation succeeds, the new set is marked as passing. If validation
 // fails, the new set is marked as failing. Signing is refused if the most
 // recent set in the chain was already marked as failing.
+//
+// To customize validation behavior, provide a validator via [WithValidator]:
+//
+//	validator := arc.NewValidator(arc.WithMinRSAKeyBits(2048))
+//	signer, err := arc.NewSigner(privateKey, "sel._domainkey.example.org",
+//		arc.WithValidator(validator))
+//
 package arc
 
 import (
@@ -149,15 +156,19 @@ type txtKey struct {
 // NewValidator creates a new Validator. If no [Resolver] is provided via
 // [WithResolver], [net.DefaultResolver] is used.  By default, the minimum
 // accepted RSA key size is 1024 bits. Use [WithMinRSAKeyBits] to override.
+//
+// The maximum number of ARC Sets is fixed at 50 per RFC 8617. The RFC defines
+// instance values (i=) as ranging from 1 to 50, making this an absolute limit
+// in the protocol specification.
 func NewValidator(opts ...ValidatorOption) *Validator {
 	v := Validator{
-		sigCache: make(map[string]txtKey),
+		sigCache:   make(map[string]txtKey),
+		maxArcSets: 50, // Fixed per RFC 8617 - instance values range from 1 to 50.
 	}
 
 	defaults := []ValidatorOption{ // nolint:prealloc
 		WithMinRSAKeyBits(1024),
 		WithResolver(net.DefaultResolver),
-		WithMaxArcSets(50),
 	}
 	opts = append(defaults, opts...)
 
@@ -170,18 +181,18 @@ func NewValidator(opts ...ValidatorOption) *Validator {
 
 // Signer adds new ARC Sets to email messages.
 type Signer struct {
-	key        crypto.Signer
-	domain     string
-	selector   string
-	authServID string
-	headers    []HeaderField
-	algorithm  string
-	minBits    int
-	maxArcSets int
-	hashOpt    crypto.SignerOpts
-	timestamp  time.Time
-	resolver   Resolver
-	validator  *Validator
+	key           crypto.Signer
+	domain        string
+	selector      string
+	authServID    string
+	headers       []HeaderField
+	algorithm     string
+	maxArcSets    int
+	minSignerBits int
+	hashOpt       crypto.SignerOpts
+	timestamp     time.Time
+	resolver      Resolver
+	validator     *Validator
 }
 
 // SignerOption configures a [Signer].
@@ -206,22 +217,29 @@ func (f signerOptionFunc) applySigner(s *Signer) { f(s) }
 //
 // For example, "2024._domainkey.example.com".
 //
+// A validator is used to validate existing ARC chains before adding a new set.
+// This determines whether the new ARC-Seal will have cv=pass or cv=fail.
+// If no validator is provided via [WithValidator], a default validator with
+// standard settings is created.
+//
 // By default, the default signed headers are used, which include common message
 // headers (From, To, Subject, Date, etc.). Use [WithSignedHeaders] to override
 // this set. If no authentication server ID is set via [WithAuthServID], it
 // defaults to the domain. If no resolver is set, [net.DefaultResolver] is used.
-// By default, the minimum accepted RSA key size is 2048 bits for signing and
-// 1024 bits for validation. Use [WithMinRSAKeyBits] to override these defaults.
+//
+// The maximum number of ARC Sets is fixed at 50 per RFC 8617. The RFC defines
+// instance values (i=) as ranging from 1 to 50, making this an absolute limit
+// in the protocol specification.
 func NewSigner(key crypto.Signer, domainKey string, opts ...SignerOption) (*Signer, error) {
 	s := Signer{
-		key: key,
+		key:        key,
+		maxArcSets: 50, // Fixed per RFC 8617 - instance values range from 1 to 50.
 	}
 
 	defaults := []SignerOption{ // nolint:prealloc
-		WithMinRSAKeyBits(2048),
 		WithSignedHeaders(defaultSignedHeaders...),
 		WithResolver(net.DefaultResolver),
-		WithMaxArcSets(50),
+		WithMinSignerRSAKeyBits(2048),
 	}
 	opts = append(defaults, opts...)
 
@@ -240,14 +258,14 @@ func NewSigner(key crypto.Signer, domainKey string, opts ...SignerOption) (*Sign
 		s.authServID = s.domain
 	}
 
-	s.validator = NewValidator(
-		WithResolver(s.resolver),
-		minRSAKeyBits{bits: s.minBits},
-		WithMaxArcSets(s.maxArcSets),
-	)
+	// Create a default validator if none was provided.
+	if s.validator == nil {
+		s.validator = NewValidator(WithResolver(s.resolver))
+	}
 
-	// Infer algorithm from key type.
-	algo, hashOpt, err := algorithmForKey(key, s.minBits)
+	// Infer algorithm from key type and validate key size.
+	// Per RFC 8301, signers SHOULD use at least 2048 bits for RSA keys.
+	algo, hashOpt, err := algorithmForKey(key, s.minSignerBits)
 	if err != nil {
 		return nil, err
 	}
@@ -288,6 +306,41 @@ func WithAuthServID(id string) SignerOption {
 	})
 }
 
+// WithMinSignerRSAKeyBits sets the minimum RSA key size in bits for the
+// signer's own private key. This is separate from the validator's minimum
+// (set via [WithMinRSAKeyBits] on the [Validator]).
+//
+// Default is 2048 bits per RFC 8301, which states that signers SHOULD use
+// at least 2048 bits.
+//
+// See https://www.rfc-editor.org/rfc/rfc8301 for details.
+func WithMinSignerRSAKeyBits(bits int) SignerOption {
+	return signerOptionFunc(func(s *Signer) {
+		s.minSignerBits = bits
+	})
+}
+
+// WithValidator sets a custom [Validator] for the signer to use when
+// validating existing ARC chains before adding a new set.
+//
+// If not provided, a default validator is created with:
+//   - [net.DefaultResolver] for DNS lookups
+//   - 1024-bit minimum RSA key size (per RFC 8301)
+//   - 50 maximum ARC sets
+//
+// You can create a custom validator to control validation behavior:
+//
+//	v := arc.NewValidator(
+//	    arc.WithMinRSAKeyBits(2048),
+//	    arc.WithResolver(customResolver),
+//	)
+//	signer, err := arc.NewSigner(key, domainKey, arc.WithValidator(v))
+func WithValidator(v *Validator) SignerOption {
+	return signerOptionFunc(func(s *Signer) {
+		s.validator = v
+	})
+}
+
 // Option is an option that can be passed to both [NewValidator] and [NewSigner].
 type Option interface {
 	SignerOption
@@ -313,42 +366,22 @@ type minRSAKeyBits struct {
 	bits int
 }
 
-func (o minRSAKeyBits) applySigner(s *Signer) {
-	s.minBits = o.bits
-}
-
 func (o minRSAKeyBits) applyValidator(v *Validator) {
 	v.minBits = o.bits
 }
 
-// WithMinRSAKeyBits sets the minimum accepted RSA key size in bits. This
-// option can be passed to both [NewValidator] and [NewSigner].
+// WithMinRSAKeyBits sets the minimum accepted RSA key size in bits for
+// validation. This option can be passed to [NewValidator].
 //
-// Defaults are chosen per RFC 8301 (which updates RFC 6376 Section 3.3.3):
-//   - [NewValidator]: 1024 bits — verifiers MUST accept 1024-bit to 4096-bit keys
-//   - [NewSigner]: 2048 bits — signers MUST use at least 1024 bits and SHOULD
-//     use 2048 bits
+// Default is 1024 bits per RFC 8301 (which updates RFC 6376 Section 3.3.3):
+// verifiers MUST accept 1024-bit to 4096-bit keys.
+//
+// Note: [NewSigner] requires RSA keys to be at least 2048 bits (hard-coded)
+// as signers SHOULD use 2048 bits per the same RFC.
 //
 // See https://www.rfc-editor.org/rfc/rfc8301 and
 // https://www.rfc-editor.org/rfc/rfc6376#section-3.3.3 for details.
-func WithMinRSAKeyBits(bits int) Option {
+func WithMinRSAKeyBits(bits int) ValidatorOption {
 	return minRSAKeyBits{bits: bits}
 }
 
-type maxArcSets struct {
-	max int
-}
-
-func (o maxArcSets) applySigner(s *Signer) {
-	s.maxArcSets = o.max
-}
-
-func (o maxArcSets) applyValidator(v *Validator) {
-	v.maxArcSets = o.max
-}
-
-// WithMaxArcSets sets the maximum number of ARC Sets allowed in a message.
-// This option can be passed to both [NewValidator] and [NewSigner].
-func WithMaxArcSets(max int) Option {
-	return maxArcSets{max: max}
-}

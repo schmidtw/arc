@@ -284,10 +284,11 @@ func TestValidatorDefaultMinBits(t *testing.T) {
 func TestValidatorMaxArcSets(t *testing.T) {
 	resolver := &mapResolver{records: map[string]string{}}
 
-	t.Run("exceeds max", func(t *testing.T) {
-		// Build a message with 3 ARC sets.
+	t.Run("exceeds max (51 sets)", func(t *testing.T) {
+		// Build a message with 51 ARC sets - exceeds the RFC 8617 limit of 50.
+		// This should fail during parsing when i=51 is encountered.
 		var headers strings.Builder
-		for i := 1; i <= 3; i++ {
+		for i := 1; i <= 51; i++ {
 			cv := "none"
 			if i > 1 {
 				cv = "pass"
@@ -298,17 +299,19 @@ func TestValidatorMaxArcSets(t *testing.T) {
 		}
 		msg := headers.String() + "From: test@example.com\r\n\r\nBody.\r\n"
 
-		v := NewValidator(WithResolver(resolver), WithMaxArcSets(2))
+		v := NewValidator(WithResolver(resolver))
 		present, err := v.Validate(context.Background(), strings.NewReader(msg))
 		assert.True(t, present)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "exceeds maximum")
+		// Fails during parsing with "instance value 51 out of range [1, 50]"
+		assert.Contains(t, err.Error(), "out of range [1, 50]")
 	})
 
-	t.Run("within max", func(t *testing.T) {
-		// Build a message with 2 ARC sets.
+	t.Run("within max (50 sets)", func(t *testing.T) {
+		// Build a message with 50 ARC sets - exactly at the RFC 8617 limit.
+		// This should parse successfully (though will fail signature verification).
 		var headers strings.Builder
-		for i := 1; i <= 2; i++ {
+		for i := 1; i <= 50; i++ {
 			cv := "none"
 			if i > 1 {
 				cv = "pass"
@@ -319,11 +322,12 @@ func TestValidatorMaxArcSets(t *testing.T) {
 		}
 		msg := headers.String() + "From: test@example.com\r\n\r\nBody.\r\n"
 
-		v := NewValidator(WithResolver(resolver), WithMaxArcSets(2))
+		v := NewValidator(WithResolver(resolver))
 		present, err := v.Validate(context.Background(), strings.NewReader(msg))
 		assert.True(t, present)
-		// Will fail later (signature verification), but not on instance count.
+		// Will fail later (signature verification), but not on instance parsing/counting.
 		if err != nil {
+			assert.NotContains(t, err.Error(), "out of range")
 			assert.NotContains(t, err.Error(), "exceeds maximum")
 		}
 	})
