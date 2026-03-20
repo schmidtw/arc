@@ -32,6 +32,40 @@ func (s *Signer) SignBytes(ctx context.Context, message []byte, authResults stri
 	return s.Sign(ctx, bytes.NewReader(message), authResults)
 }
 
+// generateAMS creates and signs the ARC-Message-Signature header.
+func (s *Signer) generateAMS(msg *message, newInstance int, ts time.Time) (string, error) {
+	bodyHash := computeBodyHash(msg.Body)
+	signHeaders := filterSignHeaders(s.headers)
+	amsForSigning := s.serializeAMSForSigning(newInstance, signHeaders, bodyHash, ts)
+	amsData := buildAMSSignedDataForSigning(msg, signHeaders, amsForSigning)
+
+	amsSig, err := s.sign(amsData)
+	if err != nil {
+		return "", fmt.Errorf("signing ARC-Message-Signature: %w", err)
+	}
+
+	return s.serializeAMS(newInstance, signHeaders, bodyHash, amsSig, ts), nil
+}
+
+// generateAS creates and signs the ARC-Seal header.
+func (s *Signer) generateAS(sets []*arcSet, cv chainStatus, newInstance int, aarStr, amsStr string, ts time.Time) (string, error) {
+	asForSigning := s.serializeArcSealForSigning(newInstance, string(cv), ts)
+
+	// When the chain is broken, the seal only covers the new set's headers.
+	sealSets := sets
+	if cv == chainFail {
+		sealSets = nil
+	}
+	asData := buildASSignedDataForSigning(sealSets, aarStr, amsStr, asForSigning)
+
+	asSig, err := s.sign(asData)
+	if err != nil {
+		return "", fmt.Errorf("signing ARC-Seal: %w", err)
+	}
+
+	return s.serializeArcSeal(newInstance, string(cv), asSig, ts), nil
+}
+
 func (s *Signer) signMessage(ctx context.Context, msg *message, authResults string) ([]byte, error) {
 	// Collect existing ARC sets.
 	sets, err := collectArcSets(msg)
@@ -48,16 +82,10 @@ func (s *Signer) signMessage(ctx context.Context, msg *message, authResults stri
 	// Check existing chain status.
 	cv := chainNone
 	if len(sets) > 0 {
-		// Refuse to sign if the most recent ARC-Seal is already marked as
-		// failing. Adding more sets to an already-failing chain is not allowed.
 		highest := sets[len(sets)-1]
 		if highest.Seal != nil && highest.Seal.ChainValidation == chainFail {
 			return nil, fmt.Errorf("cannot seal: most recent ARC-Seal has cv=fail")
 		}
-
-		// Validate existing chain. We only need the status to determine
-		// whether the new set passes or fails; validation errors are
-		// expected when the chain is broken.
 		cv, _ = s.validator.validateMessage(ctx, msg)
 	}
 
@@ -66,46 +94,17 @@ func (s *Signer) signMessage(ctx context.Context, msg *message, authResults stri
 		ts = time.Now()
 	}
 
-	// Generate ARC-Authentication-Results.
 	aarStr := s.serializeAAR(newInstance, authResults)
 
-	// Generate ARC-Message-Signature.
-	// Compute body hash.
-	bodyHash := computeBodyHash(msg.Body)
-
-	// Filter headers list.
-	signHeaders := filterSignHeaders(s.headers)
-
-	// Build AMS with empty signature for signing input.
-	amsForSigning := s.serializeAMSForSigning(newInstance, signHeaders, bodyHash, ts)
-
-	// Build and sign the AMS data (selected headers + the AMS header itself).
-	amsData := buildAMSSignedDataForSigning(msg, signHeaders, amsForSigning)
-
-	amsSig, err := s.sign(amsData)
+	amsStr, err := s.generateAMS(msg, newInstance, ts)
 	if err != nil {
-		return nil, fmt.Errorf("signing ARC-Message-Signature: %w", err)
+		return nil, err
 	}
 
-	amsStr := s.serializeAMS(newInstance, signHeaders, bodyHash, amsSig, ts)
-
-	// Generate ARC-Seal.
-	asForSigning := s.serializeArcSealForSigning(newInstance, string(cv), ts)
-
-	// Build the seal signing input. When the chain is broken, the seal only
-	// covers the new set's headers (not the broken existing chain).
-	sealSets := sets
-	if cv == chainFail {
-		sealSets = nil
-	}
-	asData := buildASSignedDataForSigning(sealSets, aarStr, amsStr, asForSigning)
-
-	asSig, err := s.sign(asData)
+	asStr, err := s.generateAS(sets, cv, newInstance, aarStr, amsStr, ts)
 	if err != nil {
-		return nil, fmt.Errorf("signing ARC-Seal: %w", err)
+		return nil, err
 	}
-
-	asStr := s.serializeArcSeal(newInstance, string(cv), asSig, ts)
 
 	// Prepend the new ARC Set to the message.
 	var result bytes.Buffer

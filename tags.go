@@ -89,6 +89,50 @@ type commonTags struct {
 	PubKey  []byte
 }
 
+// parseTag parses a single tag key-value pair and updates the commonTags struct.
+func (c *commonTags) parseTag(key, value string) error {
+	var err error
+
+	switch key {
+	case "i":
+		c.Instance, err = parseInstanceValue(value)
+	case "a":
+		c.Algo = value
+	case "b":
+		c.Sig, err = decodeBase64Value(value)
+		if err != nil {
+			err = fmt.Errorf("invalid signature encoding: %w", err)
+		}
+	case "bh":
+		c.BodyHash, err = decodeBase64Value(value)
+		if err != nil {
+			err = fmt.Errorf("invalid body hash encoding: %w", err)
+		}
+	case "c":
+		c.Canon = value
+	case "cv":
+		c.CV = value
+	case "d":
+		c.Domain = value
+	case "h":
+		c.Headers, c.Hash = value, value
+	case "k":
+		c.KeyType = value
+	case "p":
+		c.PubKey, err = decodeBase64Value(value)
+		if err != nil {
+			err = fmt.Errorf("invalid public key encoding: %w", err)
+		}
+	case "s":
+		c.Selector = value
+	case "t":
+		c.Time, err = parseTimestampValue(value)
+	case "v":
+		c.Version = value
+	}
+	return err
+}
+
 // parseCommonTags parses a tag-value list into a commonTags struct without validation.
 // Duplicate tags return an error. Invalid base64 encodings or instance values return an error.
 // Missing or extra tags are not validated - use conversion methods for validation.
@@ -113,54 +157,8 @@ func parseCommonTags(s string) (commonTags, error) {
 		}
 		seen[key] = true
 
-		switch key {
-		case "i":
-			i, err := parseInstanceValue(value)
-			if err != nil {
-				return commonTags{}, err
-			}
-			tags.Instance = i
-		case "a":
-			tags.Algo = value
-		case "b":
-			sig, err := decodeBase64Value(value)
-			if err != nil {
-				return commonTags{}, fmt.Errorf("invalid signature encoding: %w", err)
-			}
-			tags.Sig = sig
-		case "bh":
-			bh, err := decodeBase64Value(value)
-			if err != nil {
-				return commonTags{}, fmt.Errorf("invalid body hash encoding: %w", err)
-			}
-			tags.BodyHash = bh
-		case "c":
-			tags.Canon = value
-		case "cv":
-			tags.CV = value
-		case "d":
-			tags.Domain = value
-		case "h":
-			tags.Headers = value
-			tags.Hash = value
-		case "k":
-			tags.KeyType = value
-		case "p":
-			pubKey, err := decodeBase64Value(value)
-			if err != nil {
-				return commonTags{}, fmt.Errorf("invalid public key encoding: %w", err)
-			}
-			tags.PubKey = pubKey
-		case "s":
-			tags.Selector = value
-		case "t":
-			ts, err := parseTimestampValue(value)
-			if err != nil {
-				return commonTags{}, err
-			}
-			tags.Time = ts
-		case "v":
-			tags.Version = value
+		if err := tags.parseTag(key, value); err != nil {
+			return commonTags{}, err
 		}
 	}
 

@@ -37,11 +37,9 @@ func parseMessage(r io.Reader) (*message, error) {
 }
 
 // parseMessageBytes parses a raw RFC 5322 message from bytes.
-func parseMessageBytes(raw []byte) (*message, error) {
-	msg := &message{Raw: raw}
-
-	// Normalize line endings to \r\n for processing.
-	// But we keep the raw bytes as-is.
+// extractHeaderLines scans raw message bytes and extracts header lines.
+// Returns header lines and body start position.
+func extractHeaderLines(raw []byte) ([]string, int, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(raw))
 	var headerLines []string
 	var inBody bool
@@ -68,18 +66,24 @@ func parseMessageBytes(raw []byte) (*message, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	// Parse header lines (handling continuation lines).
+	return headerLines, bodyStart, nil
+}
+
+// parseHeaderLines parses header lines handling RFC 822 continuation lines.
+func parseHeaderLines(headerLines []string) []header {
+	var headers []header
 	var current strings.Builder
 	var currentKey string
+
 	flush := func() {
 		if currentKey != "" {
 			rawHdr := current.String()
 			value := rawHdr[len(currentKey)+1:] // skip "Key:"
 			value = strings.TrimLeft(value, " \t")
-			msg.Headers = append(msg.Headers, header{
+			headers = append(headers, header{
 				Key:   currentKey,
 				Value: value,
 				Raw:   rawHdr,
@@ -113,7 +117,20 @@ func parseMessageBytes(raw []byte) (*message, error) {
 	}
 	flush()
 
-	if inBody && bodyStart <= len(raw) {
+	return headers
+}
+
+func parseMessageBytes(raw []byte) (*message, error) {
+	msg := &message{Raw: raw}
+
+	headerLines, bodyStart, err := extractHeaderLines(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	msg.Headers = parseHeaderLines(headerLines)
+
+	if bodyStart > 0 && bodyStart <= len(raw) {
 		msg.Body = raw[bodyStart:]
 	}
 

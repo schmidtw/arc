@@ -16,7 +16,6 @@ linters:
     - prealloc
     - unconvert
   disable:
-    - funlen
     - errcheck
     - ineffassign
   settings:
