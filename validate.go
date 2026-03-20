@@ -183,7 +183,7 @@ func (v *Validator) cacheAdd(domainKey, record string, verify verifyFunc) {
 	}
 }
 
-// lookupKey retrieves the public key for the given domain and selector
+// lookupKey retrieves a verification function for the given domain and selector
 // via DNS TXT record lookup.
 func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (verifyFunc, error) {
 	domainKey := makeDomainkey(selector, domain)
