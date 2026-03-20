@@ -72,7 +72,8 @@ func TestCacheDisabled(t *testing.T) {
 	resolver.setRecord(testDomainKey, record)
 
 	// Create validator with caching disabled
-	v := NewValidator(WithResolver(resolver), WithMaxCacheSize(0))
+	v, err := NewValidator(WithResolver(resolver), WithMaxCacheSize(0))
+	require.NoError(t, err)
 
 	// Perform multiple lookups
 	for i := 0; i < 5; i++ {
@@ -94,7 +95,8 @@ func TestBoundedCacheLRU(t *testing.T) {
 	resolver := newTestCacheResolver()
 
 	// Create validator with cache size of 3
-	v := NewValidator(WithResolver(resolver), WithMaxCacheSize(3))
+	v, err := NewValidator(WithResolver(resolver), WithMaxCacheSize(3))
+	require.NoError(t, err)
 
 	// Add 4 different keys to trigger eviction
 	keys := []struct {
@@ -139,7 +141,8 @@ func TestUnboundedCache(t *testing.T) {
 	resolver := newTestCacheResolver()
 
 	// Create validator with unbounded cache
-	v := NewValidator(WithResolver(resolver), WithMaxCacheSize(-1))
+	v, err := NewValidator(WithResolver(resolver), WithMaxCacheSize(-1))
+	require.NoError(t, err)
 
 	// Add many keys
 	numKeys := 100
@@ -165,7 +168,8 @@ func TestCacheHitWithLRUUpdate(t *testing.T) {
 	resolver := newTestCacheResolver()
 
 	// Create validator with cache size of 3
-	v := NewValidator(WithResolver(resolver), WithMaxCacheSize(3))
+	v, err := NewValidator(WithResolver(resolver), WithMaxCacheSize(3))
+	require.NoError(t, err)
 
 	// Add 3 keys
 	keys := []struct {
@@ -189,7 +193,7 @@ func TestCacheHitWithLRUUpdate(t *testing.T) {
 	// Access first key again to make it most recently used
 	domainKey1 := makeDomainkey(keys[0].selector, keys[0].domain)
 	initialLookups := resolver.getLookupCount(domainKey1)
-	_, err := v.lookupKey(context.Background(), keys[0].domain, keys[0].selector)
+	_, err = v.lookupKey(context.Background(), keys[0].domain, keys[0].selector)
 	require.NoError(t, err)
 
 	// DNS lookup happens to check if record changed, but verifier is from cache
@@ -219,10 +223,11 @@ func TestCacheInvalidationOnRecordChange(t *testing.T) {
 	record1, _ := generateTestKeyRecord(t)
 	resolver.setRecord(testDomainKey, record1)
 
-	v := NewValidator(WithResolver(resolver), WithMaxCacheSize(10))
+	v, err := NewValidator(WithResolver(resolver), WithMaxCacheSize(10))
+	require.NoError(t, err)
 
 	// First lookup
-	_, err := v.lookupKey(context.Background(), "example.com", "sel")
+	_, err = v.lookupKey(context.Background(), "example.com", "sel")
 	require.NoError(t, err)
 
 	// Verify it's cached
@@ -266,7 +271,8 @@ func TestCacheConcurrentAccess(t *testing.T) {
 	record, _ := generateTestKeyRecord(t)
 	resolver.setRecord(testDomainKey, record)
 
-	v := NewValidator(WithResolver(resolver), WithMaxCacheSize(10))
+	v, err := NewValidator(WithResolver(resolver), WithMaxCacheSize(10))
+	require.NoError(t, err)
 
 	// Concurrent lookups for the same key
 	var wg sync.WaitGroup
@@ -297,14 +303,15 @@ func TestCacheSizeZeroVsNegativeOne(t *testing.T) {
 	resolver := newTestCacheResolver()
 
 	t.Run("maxCacheSize=0 disables caching", func(t *testing.T) {
-		v := NewValidator(WithResolver(resolver), WithMaxCacheSize(0))
+		v, err := NewValidator(WithResolver(resolver), WithMaxCacheSize(0))
+		require.NoError(t, err)
 		assert.Equal(t, 0, v.maxCacheSize)
 
 		record, _ := generateTestKeyRecord(t)
 		domainKey := "sel._domainkey.example.com"
 		resolver.setRecord(domainKey, record)
 
-		_, err := v.lookupKey(context.Background(), "example.com", "sel")
+		_, err = v.lookupKey(context.Background(), "example.com", "sel")
 		require.NoError(t, err)
 
 		v.m.Lock()
@@ -313,14 +320,15 @@ func TestCacheSizeZeroVsNegativeOne(t *testing.T) {
 	})
 
 	t.Run("maxCacheSize=-1 enables unbounded caching", func(t *testing.T) {
-		v := NewValidator(WithResolver(resolver), WithMaxCacheSize(-1))
+		v, err := NewValidator(WithResolver(resolver), WithMaxCacheSize(-1))
+		require.NoError(t, err)
 		assert.Equal(t, -1, v.maxCacheSize)
 
 		record, _ := generateTestKeyRecord(t)
 		domainKey := "sel2._domainkey.example.com"
 		resolver.setRecord(domainKey, record)
 
-		_, err := v.lookupKey(context.Background(), "example.com", "sel2")
+		_, err = v.lookupKey(context.Background(), "example.com", "sel2")
 		require.NoError(t, err)
 
 		v.m.Lock()

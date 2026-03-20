@@ -38,7 +38,8 @@ func TestValimailValidationSuite(t *testing.T) {
 
 	// Build resolver from TXT records.
 	resolver := buildTXTRecordResolver(suite.TXTRecords)
-	v := NewValidator(WithResolver(resolver))
+	v, err := NewValidator(WithResolver(resolver))
+	require.NoError(t, err)
 
 	for name, tc := range suite.Tests {
 		t.Run(name, func(t *testing.T) {

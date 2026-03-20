@@ -76,6 +76,10 @@ import (
 // fails during ARC chain validation. Use [errors.Is] to check for this error.
 var ErrInvalidSignature = errors.New("invalid signature")
 
+// ErrRSAKeyTooSmall is returned when an RSA key is smaller than the configured
+// minimum size during validation or signing. Use [errors.Is] to check for this error.
+var ErrRSAKeyTooSmall = errors.New("RSA key size is too small")
+
 // chainStatus represents the internal validation status of an ARC chain.
 type chainStatus string
 
@@ -170,7 +174,7 @@ type cacheEntry struct {
 // The maximum number of ARC Sets is fixed at 50 per RFC 8617. The RFC defines
 // instance values (i=) as ranging from 1 to 50, making this an absolute limit
 // in the protocol specification.
-func NewValidator(opts ...ValidatorOption) *Validator {
+func NewValidator(opts ...ValidatorOption) (*Validator, error) {
 	v := Validator{
 		sigCache:   make(map[string]txtKey),
 		cacheList:  list.New(),
@@ -188,7 +192,11 @@ func NewValidator(opts ...ValidatorOption) *Validator {
 		opt.applyValidator(&v)
 	}
 
-	return &v
+	if v.minBits < 1024 {
+		return nil, ErrRSAKeyTooSmall
+	}
+
+	return &v, nil
 }
 
 // Signer adds new ARC Sets to email messages.
@@ -251,12 +259,16 @@ func NewSigner(key crypto.Signer, domainKey string, opts ...SignerOption) (*Sign
 	defaults := []SignerOption{ // nolint:prealloc
 		WithSignedHeaders(defaultSignedHeaders...),
 		WithResolver(net.DefaultResolver),
-		WithMinSignerRSAKeyBits(2048),
+		WithMinRSAKeyBits(2048),
 	}
 	opts = append(defaults, opts...)
 
 	for _, opt := range opts {
 		opt.applySigner(&s)
+	}
+
+	if s.minSignerBits < 1024 {
+		return nil, ErrRSAKeyTooSmall
 	}
 
 	// Parse "<selector>._domainkey.<domain>" from the FQDN.
@@ -272,7 +284,11 @@ func NewSigner(key crypto.Signer, domainKey string, opts ...SignerOption) (*Sign
 
 	// Create a default validator if none was provided.
 	if s.validator == nil {
-		s.validator = NewValidator(WithResolver(s.resolver))
+		var err error
+		s.validator, err = NewValidator(WithResolver(s.resolver))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Infer algorithm from key type and validate key size.
@@ -315,20 +331,6 @@ func WithTimestamp(ts time.Time) SignerOption {
 func WithAuthServID(id string) SignerOption {
 	return signerOptionFunc(func(s *Signer) {
 		s.authServID = id
-	})
-}
-
-// WithMinSignerRSAKeyBits sets the minimum RSA key size in bits for the
-// signer's own private key. This is separate from the validator's minimum
-// (set via [WithMinRSAKeyBits] on the [Validator]).
-//
-// Default is 2048 bits per RFC 8301, which states that signers SHOULD use
-// at least 2048 bits.
-//
-// See https://www.rfc-editor.org/rfc/rfc8301 for details.
-func WithMinSignerRSAKeyBits(bits int) SignerOption {
-	return signerOptionFunc(func(s *Signer) {
-		s.minSignerBits = bits
 	})
 }
 
@@ -382,19 +384,26 @@ func (o minRSAKeyBits) applyValidator(v *Validator) {
 	v.minBits = o.bits
 }
 
-// WithMinRSAKeyBits sets the minimum accepted RSA key size in bits for
-// validation. This option can be passed to [NewValidator].
+func (o minRSAKeyBits) applySigner(s *Signer) {
+	s.minSignerBits = o.bits
+}
+
+// WithMinRSAKeyBits sets the minimum accepted RSA key size in bits.
+// This option can be passed to both [NewValidator] and [NewSigner].
 //
-// Default is 1024 bits per RFC 8301 (which updates RFC 6376 Section 3.3.3):
-// verifiers MUST accept 1024-bit to 4096-bit keys.
+// For validators, this controls the minimum key size accepted when validating
+// other parties' signatures. Default is 1024 bits per RFC 8301 (which updates
+// RFC 6376 Section 3.3.3): verifiers MUST accept 1024-bit to 4096-bit keys.
 //
-// Note: This controls the minimum for validating other parties' keys. For
-// the signer's own private key minimum, use [WithMinSignerRSAKeyBits] which
-// defaults to 2048 bits per RFC 8301.
+// For signers, this controls the minimum key size for the signer's own private
+// key. Default is 2048 bits per RFC 8301, which states that signers SHOULD use
+// at least 2048 bits.
+//
+// Values less than 1024 result in an error.
 //
 // See https://www.rfc-editor.org/rfc/rfc8301 and
 // https://www.rfc-editor.org/rfc/rfc6376#section-3.3.3 for details.
-func WithMinRSAKeyBits(bits int) ValidatorOption {
+func WithMinRSAKeyBits(bits int) Option {
 	return minRSAKeyBits{bits: bits}
 }
 

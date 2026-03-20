@@ -10,7 +10,6 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/rsa"
 	"encoding/base64"
 	"strings"
 	"testing"
@@ -30,7 +29,9 @@ func TestSignNoExistingChain(t *testing.T) {
 
 	msg := testMessage
 
-	v := NewValidator(WithResolver(resolver))
+	v, err := NewValidator(WithResolver(resolver))
+	require.NoError(t, err)
+
 	signer, err := NewSigner(key, "sel._domainkey.example.org",
 		WithValidator(v),
 		WithSignedHeaders(HeaderFrom, HeaderTo, HeaderSubject),
@@ -71,7 +72,8 @@ func TestSignWithExistingChain(t *testing.T) {
 
 	msg := testMessage
 
-	v := NewValidator(WithResolver(combined))
+	v, err := NewValidator(WithResolver(combined))
+	require.NoError(t, err)
 
 	// Sign first time.
 	signer1, err := NewSigner(key1, "sel1._domainkey.example.org",
@@ -116,7 +118,8 @@ func TestSignRefusesFailedChain(t *testing.T) {
 		"ARC-Authentication-Results: i=1; example.org; spf=pass\r\n" +
 		testMessageSimple
 
-	v := NewValidator(WithResolver(resolver))
+	v, err := NewValidator(WithResolver(resolver))
+	require.NoError(t, err)
 	signer, err := NewSigner(key, "sel._domainkey.example.org",
 		WithValidator(v),
 		WithSignedHeaders(HeaderFrom),
@@ -140,7 +143,8 @@ func TestSignWithEd25519(t *testing.T) {
 
 	msg := testMessage
 
-	v := NewValidator(WithResolver(resolver))
+	v, err := NewValidator(WithResolver(resolver))
+	require.NoError(t, err)
 	signer, err := NewSigner(priv, "sel._domainkey.example.org",
 		WithValidator(v),
 		WithSignedHeaders(HeaderFrom, HeaderTo, HeaderSubject),
@@ -162,16 +166,24 @@ func TestSignUnsupportedKeyType(t *testing.T) {
 	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	v := NewValidator()
+	v, err := NewValidator()
+	require.NoError(t, err)
 	_, err = NewSigner(ecKey, "sel._domainkey.example.org", WithValidator(v))
 	require.Error(t, err)
 }
 
 func TestSignerMinRSAKeyBits(t *testing.T) {
+	t.Run("512-bit option rejected", func(t *testing.T) {
+		key := getRSATestKey(t, 2048)
+		s, err := NewSigner(key, "sel._domainkey.example.org",
+			WithMinRSAKeyBits(512))
+		assert.Error(t, err, "should reject 512-bit keys")
+		assert.Nil(t, s)
+	})
+
 	// Test that the signer enforces a minimum of 2048 bits for RSA keys.
 	t.Run("1024-bit key rejected", func(t *testing.T) {
-		key, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // Testing weak keys
-		require.NoError(t, err)
+		key := getRSATestKey(t, 1024)
 
 		resolver := &mapResolver{
 			records: map[string]string{
@@ -179,7 +191,8 @@ func TestSignerMinRSAKeyBits(t *testing.T) {
 			},
 		}
 
-		v := NewValidator(WithResolver(resolver))
+		v, err := NewValidator(WithResolver(resolver))
+		require.NoError(t, err)
 		_, err = NewSigner(key, "sel._domainkey.example.org",
 			WithValidator(v),
 			WithResolver(resolver))
@@ -188,8 +201,7 @@ func TestSignerMinRSAKeyBits(t *testing.T) {
 	})
 
 	t.Run("2048-bit key accepted", func(t *testing.T) {
-		key, err := rsa.GenerateKey(rand.Reader, 2048)
-		require.NoError(t, err)
+		key := getRSATestKey(t, 2048)
 
 		resolver := &mapResolver{
 			records: map[string]string{
@@ -197,7 +209,8 @@ func TestSignerMinRSAKeyBits(t *testing.T) {
 			},
 		}
 
-		v := NewValidator(WithResolver(resolver))
+		v, err := NewValidator(WithResolver(resolver))
+		require.NoError(t, err)
 		_, err = NewSigner(key, "sel._domainkey.example.org",
 			WithValidator(v),
 			WithResolver(resolver))
@@ -210,12 +223,10 @@ func TestSignerValidatorMinBits(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a 3072-bit key for the second signer.
-	signingKey, err := rsa.GenerateKey(rand.Reader, 3072)
-	require.NoError(t, err)
+	signingKey := getRSATestKey(t, 3072)
 
 	// Create a 2048-bit key for the first signer.
-	existingKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
+	existingKey := getRSATestKey(t, 2048)
 
 	resolver := &mapResolver{
 		records: map[string]string{
@@ -225,7 +236,8 @@ func TestSignerValidatorMinBits(t *testing.T) {
 	}
 
 	// Create the first signer with a validator that accepts 2048-bit keys.
-	v1 := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(2048))
+	v1, err := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(2048))
+	require.NoError(t, err)
 	signer1, err := NewSigner(existingKey, "sel1._domainkey.example.org",
 		WithValidator(v1),
 		WithResolver(resolver),
@@ -238,7 +250,8 @@ func TestSignerValidatorMinBits(t *testing.T) {
 
 	// Create a second signer with a validator that requires 3072-bit keys.
 	// The signer's own key is 3072 bits, so construction should succeed.
-	v2 := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(3072))
+	v2, err := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(3072))
+	require.NoError(t, err)
 	signer2, err := NewSigner(signingKey, "sel2._domainkey.example.org",
 		WithValidator(v2),
 		WithResolver(resolver),
@@ -268,10 +281,8 @@ func TestEndToEndSignThenValidate(t *testing.T) {
 	ctx := context.Background()
 
 	// Generate two different keys.
-	key1, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-	key2, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
+	key1 := getRSATestKey(t, 2048)
+	key2 := getRSATestKey(t, 2048)
 
 	// Create a resolver with both public keys.
 	resolver := &mapResolver{
@@ -281,7 +292,8 @@ func TestEndToEndSignThenValidate(t *testing.T) {
 		},
 	}
 
-	v := NewValidator(WithResolver(resolver))
+	v, err := NewValidator(WithResolver(resolver))
+	require.NoError(t, err)
 
 	// Original message.
 	originalMsg := "From: sender@example.com\r\nTo: recipient@example.com\r\nSubject: Test\r\n\r\nThis is a test message.\r\n"

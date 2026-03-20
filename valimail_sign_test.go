@@ -92,14 +92,15 @@ func TestValimailSignSuite(t *testing.T) {
 				// Extract auth results from the message's Authentication-Results header.
 				authResults := extractAuthResults(tc.Message, tc.SrvID)
 
-				v := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(1024))
+				v, err := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(1024))
+				require.NoError(t, err)
 				signer, err := NewSigner(privKey, sel+"._domainkey."+domain,
 					WithValidator(v),
 					WithAuthServID(tc.SrvID),
 					WithSignedHeaders(sigHeaders...),
 					WithTimestamp(time.Unix(tc.T, 0)),
 					WithResolver(resolver),
-					WithMinSignerRSAKeyBits(1024),
+					WithMinRSAKeyBits(1024),
 				)
 				require.NoError(t, err)
 
@@ -122,14 +123,15 @@ func testSignRefused(t *testing.T, tc valimailSignTC, privKey crypto.Signer, dom
 	sigHeaders := toHeaderFields(strings.Split(tc.SigHeaders, ":"))
 	authResults := extractAuthResults(tc.Message, tc.SrvID)
 
-	v := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(1024))
+	v, err := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(1024))
+	require.NoError(t, err)
 	signer, err := NewSigner(privKey, sel+"._domainkey."+domain,
 		WithValidator(v),
 		WithAuthServID(tc.SrvID),
 		WithSignedHeaders(sigHeaders...),
 		WithTimestamp(time.Unix(tc.T, 0)),
 		WithResolver(resolver),
-		WithMinSignerRSAKeyBits(1024),
+		WithMinRSAKeyBits(1024),
 	)
 	require.NoError(t, err)
 

@@ -5,7 +5,6 @@ package arc
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
@@ -21,7 +20,8 @@ import (
 
 func TestValidateNoArcHeaders(t *testing.T) {
 	msg := "From: test@example.com\r\nTo: dest@example.com\r\nSubject: Test\r\n\r\nBody.\r\n"
-	v := NewValidator(WithResolver(&mapResolver{records: map[string]string{}}))
+	v, err := NewValidator(WithResolver(&mapResolver{records: map[string]string{}}))
+	require.NoError(t, err)
 	present, err := v.Validate(context.Background(), strings.NewReader(msg))
 	require.NoError(t, err)
 	assert.False(t, present)
@@ -32,7 +32,8 @@ func TestValidateValidChain(t *testing.T) {
 
 	msg := buildSignedMessage(t, key, "example.org", "sel", 1)
 
-	v := NewValidator(WithResolver(resolver))
+	v, err := NewValidator(WithResolver(resolver))
+	require.NoError(t, err)
 	present, err := v.Validate(context.Background(), strings.NewReader(msg))
 	require.NoError(t, err)
 	assert.True(t, present)
@@ -62,7 +63,8 @@ func TestValidateStructuralFailures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			v := NewValidator(WithResolver(resolver))
+			v, err := NewValidator(WithResolver(resolver))
+			require.NoError(t, err)
 			present, err := v.Validate(context.Background(), strings.NewReader(tt.msg))
 			assert.True(t, present)
 			assert.Error(t, err)
@@ -76,7 +78,8 @@ func TestValidateHighestCVFail(t *testing.T) {
 		"ARC-Authentication-Results: i=1; example.org; spf=pass\r\n" +
 		"From: test@example.com\r\n\r\nBody.\r\n"
 
-	v := NewValidator(WithResolver(&mapResolver{records: map[string]string{}}))
+	v, err := NewValidator(WithResolver(&mapResolver{records: map[string]string{}}))
+	require.NoError(t, err)
 	present, err := v.Validate(context.Background(), strings.NewReader(msg))
 	assert.True(t, present)
 	assert.Error(t, err)
@@ -86,8 +89,7 @@ func TestValidateHighestCVFail(t *testing.T) {
 
 func generateTestKey(t *testing.T, domain, selector string) (*rsa.PrivateKey, *mapResolver) {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
+	key := getRSATestKey(t, 2048)
 
 	resolver := &mapResolver{
 		records: map[string]string{
@@ -234,8 +236,7 @@ func TestValidatorMinRSAKeyBits(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Generate a key of the specified size.
-			key, err := rsa.GenerateKey(rand.Reader, tt.keySize)
-			require.NoError(t, err)
+			key := getRSATestKey(t, tt.keySize)
 
 			// Create resolver with the public key.
 			resolver := &mapResolver{
@@ -248,7 +249,8 @@ func TestValidatorMinRSAKeyBits(t *testing.T) {
 			msg := buildSignedMessage(t, key, "example.org", "sel", 1)
 
 			// Validate with the specified minBits.
-			v := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(tt.minBits))
+			v, err := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(tt.minBits))
+			require.NoError(t, err)
 			present, err := v.Validate(context.Background(), strings.NewReader(msg))
 			assert.True(t, present)
 
@@ -264,8 +266,7 @@ func TestValidatorMinRSAKeyBits(t *testing.T) {
 
 func TestValidatorDefaultMinBits(t *testing.T) {
 	// Test that the default minimum is 1024 bits.
-	key, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // Testing weak keys
-	require.NoError(t, err)
+	key := getRSATestKey(t, 1024)
 
 	resolver := &mapResolver{
 		records: map[string]string{
@@ -275,12 +276,18 @@ func TestValidatorDefaultMinBits(t *testing.T) {
 
 	msg := buildSignedMessage(t, key, "example.org", "sel", 1)
 
-	v := NewValidator(WithResolver(resolver)) // No explicit minBits
+	v, err := NewValidator(WithResolver(resolver)) // No explicit minBits
+	require.NoError(t, err)
 	present, err := v.Validate(context.Background(), strings.NewReader(msg))
 	assert.True(t, present)
 	require.NoError(t, err, "default should accept 1024-bit keys")
 }
 
+func TestValidatorMinBits(t *testing.T) {
+	v, err := NewValidator(WithMinRSAKeyBits(512))
+	assert.Error(t, err)
+	assert.Nil(t, v)
+}
 func TestValidatorMaxArcSets(t *testing.T) {
 	resolver := &mapResolver{records: map[string]string{}}
 
@@ -299,7 +306,8 @@ func TestValidatorMaxArcSets(t *testing.T) {
 		}
 		msg := headers.String() + "From: test@example.com\r\n\r\nBody.\r\n"
 
-		v := NewValidator(WithResolver(resolver))
+		v, err := NewValidator(WithResolver(resolver))
+		require.NoError(t, err)
 		present, err := v.Validate(context.Background(), strings.NewReader(msg))
 		assert.True(t, present)
 		require.Error(t, err)
@@ -322,7 +330,8 @@ func TestValidatorMaxArcSets(t *testing.T) {
 		}
 		msg := headers.String() + "From: test@example.com\r\n\r\nBody.\r\n"
 
-		v := NewValidator(WithResolver(resolver))
+		v, err := NewValidator(WithResolver(resolver))
+		require.NoError(t, err)
 		present, err := v.Validate(context.Background(), strings.NewReader(msg))
 		assert.True(t, present)
 		// Will fail later (signature verification), but not on instance parsing/counting.
