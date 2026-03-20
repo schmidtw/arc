@@ -116,6 +116,40 @@ func validateStructure(sets []*arcSet) error {
 	return nil
 }
 
+// buildVerifier creates a verifyFunc for the given public key.
+func (v *Validator) buildVerifier(key crypto.PublicKey, domainKey string) (verifyFunc, error) {
+	switch k := key.(type) {
+	case *rsa.PublicKey:
+		if k.N.BitLen() < v.minBits {
+			return nil, fmt.Errorf("RSA key too small: %d bits (minimum %d)", k.N.BitLen(), v.minBits)
+		}
+		return func(algorithm string, data, signature []byte) error {
+			if algorithm != algRSASHA256 {
+				return fmt.Errorf("algorithm mismatch: expected %s, got %s", algRSASHA256, algorithm)
+			}
+			hash := sha256.Sum256(data)
+			if err := rsa.VerifyPKCS1v15(k, crypto.SHA256, hash[:], signature); err != nil {
+				return errors.Join(ErrInvalidSignature, err)
+			}
+			return nil
+		}, nil
+	case ed25519.PublicKey:
+		return func(algorithm string, data, signature []byte) error {
+			if algorithm != algEd25519SHA256 {
+				return fmt.Errorf("algorithm mismatch: expected %s, got %s", algEd25519SHA256, algorithm)
+			}
+			hash := sha256.Sum256(data)
+			if !ed25519.Verify(k, hash[:], signature) {
+				return errors.Join(ErrInvalidSignature,
+					fmt.Errorf("ed25519 signature verification failed"))
+			}
+			return nil
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported key type %T for %q", key, domainKey)
+	}
+}
+
 // lookupKey retrieves the public key for the given domain and selector
 // via DNS TXT record lookup.
 func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (verifyFunc, error) {
@@ -130,61 +164,47 @@ func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (ver
 	}
 
 	record := strings.Join(records, "")
-	v.m.Lock()
-	defer v.m.Unlock()
 
+	// Check cache under lock.
+	v.m.Lock()
 	if cached, ok := v.sigCache[domainKey]; ok {
 		if cached.txt == record {
 			// Cache hit: use previously parsed key.
+			v.m.Unlock()
 			return cached.verify, nil
 		}
 		// Cache miss: record changed since last lookup. Remove old cache entry.
 		delete(v.sigCache, domainKey)
 	}
+	v.m.Unlock()
 
-	info := txtKey{
-		txt: record,
-	}
+	// Parse and build verifier outside lock to reduce contention.
+	// Parsing (base64 decode, ASN.1 decode) is relatively expensive.
 	key, err := parseKeyRecord(record)
 	if err != nil {
 		return nil, fmt.Errorf("parsing key record for %q: %w", domainKey, err)
 	}
 
-	switch k := key.(type) {
-	case *rsa.PublicKey:
-		if k.N.BitLen() < v.minBits {
-			return nil, fmt.Errorf("RSA key too small: %d bits (minimum %d)", k.N.BitLen(), v.minBits)
-		}
-		info.verify = func(algorithm string, data, signature []byte) error {
-			if algorithm != algRSASHA256 {
-				return fmt.Errorf("algorithm mismatch: expected %s, got %s", algRSASHA256, algorithm)
-			}
-
-			hash := sha256.Sum256(data)
-			if err := rsa.VerifyPKCS1v15(k, crypto.SHA256, hash[:], signature); err != nil {
-				return errors.Join(ErrInvalidSignature, err)
-			}
-			return nil
-		}
-	case ed25519.PublicKey:
-		// No size requirement for Ed25519 keys.
-		info.verify = func(algorithm string, data, signature []byte) error {
-			if algorithm != algEd25519SHA256 {
-				return fmt.Errorf("algorithm mismatch: expected %s, got %s", algEd25519SHA256, algorithm)
-			}
-
-			hash := sha256.Sum256(data)
-			if !ed25519.Verify(k, hash[:], signature) {
-				return errors.Join(ErrInvalidSignature,
-					fmt.Errorf("ed25519 signature verification failed"))
-			}
-			return nil
-		}
-	default:
-		return nil, fmt.Errorf("unsupported key type %T for %q", key, domainKey)
+	verify, err := v.buildVerifier(key, domainKey)
+	if err != nil {
+		return nil, err
 	}
 
+	info := txtKey{
+		txt:    record,
+		verify: verify,
+	}
+
+	// Store in cache with a second lock and double-check.
+	// Another goroutine might have parsed and stored this key while we were parsing.
+	v.m.Lock()
+	if cached, ok := v.sigCache[domainKey]; ok && cached.txt == record {
+		// Another goroutine beat us to it. Use their cached result.
+		v.m.Unlock()
+		return cached.verify, nil
+	}
 	v.sigCache[domainKey] = info
+	v.m.Unlock()
 
 	return info.verify, nil
 }
