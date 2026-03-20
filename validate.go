@@ -5,6 +5,7 @@ package arc
 
 import (
 	"bytes"
+	"container/list"
 	"context"
 	"crypto"
 	"crypto/ed25519"
@@ -150,6 +151,33 @@ func (v *Validator) buildVerifier(key crypto.PublicKey, domainKey string) (verif
 	}
 }
 
+// evictLRU removes the least recently used cache entry if at capacity.
+func (v *Validator) evictLRU() {
+	if v.maxCacheSize > 0 && len(v.sigCache) >= v.maxCacheSize {
+		if elem := v.cacheList.Back(); elem != nil {
+			entry := elem.Value.(*cacheEntry)
+			delete(v.sigCache, entry.key)
+			v.cacheList.Remove(elem)
+		}
+	}
+}
+
+// cacheAdd adds a new entry to the cache with LRU tracking.
+func (v *Validator) cacheAdd(domainKey, record string, verify verifyFunc) {
+	v.evictLRU()
+
+	var element *list.Element
+	if v.maxCacheSize != 0 {
+		element = v.cacheList.PushFront(&cacheEntry{key: domainKey})
+	}
+
+	v.sigCache[domainKey] = txtKey{
+		txt:     record,
+		verify:  verify,
+		element: element,
+	}
+}
+
 // lookupKey retrieves the public key for the given domain and selector
 // via DNS TXT record lookup.
 func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (verifyFunc, error) {
@@ -169,17 +197,22 @@ func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (ver
 	v.m.Lock()
 	if cached, ok := v.sigCache[domainKey]; ok {
 		if cached.txt == record {
-			// Cache hit: use previously parsed key.
+			// Cache hit: move to front (most recently used) and return.
+			if cached.element != nil {
+				v.cacheList.MoveToFront(cached.element)
+			}
 			v.m.Unlock()
 			return cached.verify, nil
 		}
 		// Cache miss: record changed since last lookup. Remove old cache entry.
+		if cached.element != nil {
+			v.cacheList.Remove(cached.element)
+		}
 		delete(v.sigCache, domainKey)
 	}
 	v.m.Unlock()
 
 	// Parse and build verifier outside lock to reduce contention.
-	// Parsing (base64 decode, ASN.1 decode) is relatively expensive.
 	key, err := parseKeyRecord(record)
 	if err != nil {
 		return nil, fmt.Errorf("parsing key record for %q: %w", domainKey, err)
@@ -190,23 +223,20 @@ func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (ver
 		return nil, err
 	}
 
-	info := txtKey{
-		txt:    record,
-		verify: verify,
-	}
-
 	// Store in cache with a second lock and double-check.
-	// Another goroutine might have parsed and stored this key while we were parsing.
 	v.m.Lock()
+	defer v.m.Unlock()
+
 	if cached, ok := v.sigCache[domainKey]; ok && cached.txt == record {
 		// Another goroutine beat us to it. Use their cached result.
-		v.m.Unlock()
+		if cached.element != nil {
+			v.cacheList.MoveToFront(cached.element)
+		}
 		return cached.verify, nil
 	}
-	v.sigCache[domainKey] = info
-	v.m.Unlock()
 
-	return info.verify, nil
+	v.cacheAdd(domainKey, record, verify)
+	return verify, nil
 }
 
 // verifyAMS verifies an ARC-Message-Signature by checking the body hash

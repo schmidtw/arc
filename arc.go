@@ -63,6 +63,7 @@
 package arc
 
 import (
+	"container/list"
 	"context"
 	"crypto"
 	"errors"
@@ -138,23 +139,33 @@ type ValidatorOption interface {
 
 // Validator validates ARC chains on email messages.
 type Validator struct {
-	resolver   Resolver
-	minBits    int
-	maxArcSets int
-	sigCache   map[string]txtKey
-	m          sync.Mutex
+	resolver     Resolver
+	minBits      int
+	maxArcSets   int
+	maxCacheSize int
+	sigCache     map[string]txtKey
+	cacheList    *list.List
+	m            sync.Mutex
 }
 
 type verifyFunc func(algorithm string, data, signature []byte) error
 
 type txtKey struct {
-	txt    string
-	verify verifyFunc
+	txt     string
+	verify  verifyFunc
+	element *list.Element
+}
+
+type cacheEntry struct {
+	key string
 }
 
 // NewValidator creates a new Validator. If no [Resolver] is provided via
 // [WithResolver], [net.DefaultResolver] is used.  By default, the minimum
 // accepted RSA key size is 1024 bits. Use [WithMinRSAKeyBits] to override.
+//
+// The DNS key cache is bounded by default to 1000 entries using LRU eviction.
+// Use [WithMaxCacheSize] to adjust the limit or disable caching.
 //
 // The maximum number of ARC Sets is fixed at 50 per RFC 8617. The RFC defines
 // instance values (i=) as ranging from 1 to 50, making this an absolute limit
@@ -162,12 +173,14 @@ type txtKey struct {
 func NewValidator(opts ...ValidatorOption) *Validator {
 	v := Validator{
 		sigCache:   make(map[string]txtKey),
+		cacheList:  list.New(),
 		maxArcSets: 50, // Fixed per RFC 8617 - instance values range from 1 to 50.
 	}
 
 	defaults := []ValidatorOption{ // nolint:prealloc
 		WithMinRSAKeyBits(1024),
 		WithResolver(net.DefaultResolver),
+		WithMaxCacheSize(1000),
 	}
 	opts = append(defaults, opts...)
 
@@ -375,11 +388,36 @@ func (o minRSAKeyBits) applyValidator(v *Validator) {
 // Default is 1024 bits per RFC 8301 (which updates RFC 6376 Section 3.3.3):
 // verifiers MUST accept 1024-bit to 4096-bit keys.
 //
-// Note: [NewSigner] requires RSA keys to be at least 2048 bits (hard-coded)
-// as signers SHOULD use 2048 bits per the same RFC.
+// Note: This controls the minimum for validating other parties' keys. For
+// the signer's own private key minimum, use [WithMinSignerRSAKeyBits] which
+// defaults to 2048 bits per RFC 8301.
 //
 // See https://www.rfc-editor.org/rfc/rfc8301 and
 // https://www.rfc-editor.org/rfc/rfc6376#section-3.3.3 for details.
 func WithMinRSAKeyBits(bits int) ValidatorOption {
 	return minRSAKeyBits{bits: bits}
+}
+
+type maxCacheSize struct {
+	size int
+}
+
+func (o maxCacheSize) applyValidator(v *Validator) {
+	v.maxCacheSize = o.size
+}
+
+// WithMaxCacheSize sets the maximum number of DNS public keys to cache.
+// This option can be passed to [NewValidator].
+//
+// The cache uses LRU (Least Recently Used) eviction when the limit is reached.
+// Set to 0 to disable caching entirely. Set to -1 for unlimited cache size
+// (not recommended for long-running services).
+//
+// Default is 1000 entries, which should be sufficient for most use cases while
+// preventing unbounded memory growth in long-running validators.
+func WithMaxCacheSize(size int) ValidatorOption {
+	if size < 0 {
+		size = -1
+	}
+	return maxCacheSize{size: size}
 }
