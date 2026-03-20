@@ -26,89 +26,11 @@ type amsTags struct {
 
 // parseAMSTags parses the tag-value list from an ARC-Message-Signature header.
 func parseAMSTags(s string) (amsTags, error) {
-	tags := amsTags{}
-	seen := make(map[string]bool)
-
-	pairs := splitTagValue(s)
-	for _, pair := range pairs {
-		key, value, ok := strings.Cut(pair, "=")
-		if !ok {
-			continue // skip malformed pairs
-		}
-
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-
-		if seen[key] {
-			return amsTags{}, fmt.Errorf("duplicate tag: %q", key)
-		}
-		seen[key] = true
-
-		switch key {
-		case "i":
-			i, err := parseInstanceValue(value)
-			if err != nil {
-				return amsTags{}, err
-			}
-			tags.Instance = i
-		case "a":
-			tags.Algo = value
-		case "b":
-			sig, err := decodeBase64Value(value)
-			if err != nil {
-				return amsTags{}, fmt.Errorf("invalid signature encoding: %w", err)
-			}
-			tags.Sig = sig
-		case "bh":
-			bh, err := decodeBase64Value(value)
-			if err != nil {
-				return amsTags{}, fmt.Errorf("invalid body hash encoding: %w", err)
-			}
-			tags.BodyHash = bh
-		case "c":
-			tags.Canon = value
-		case "d":
-			tags.Domain = value
-		case "h":
-			tags.Headers = value
-		case "s":
-			tags.Selector = value
-		case "t":
-			ts, err := parseTimestampValue(value)
-			if err != nil {
-				return amsTags{}, err
-			}
-			tags.Time = ts
-		}
+	common, err := parseCommonTags(s)
+	if err != nil {
+		return amsTags{}, err
 	}
-
-	// Validate required fields
-	if tags.Instance == 0 {
-		return amsTags{}, fmt.Errorf("missing required tag: i")
-	}
-	if tags.Algo == "" {
-		return amsTags{}, fmt.Errorf("missing required tag: a")
-	}
-	if len(tags.Sig) == 0 {
-		return amsTags{}, fmt.Errorf("missing required tag: b")
-	}
-	if len(tags.BodyHash) == 0 {
-		return amsTags{}, fmt.Errorf("missing required tag: bh")
-	}
-	if tags.Canon == "" {
-		return amsTags{}, fmt.Errorf("missing required tag: c")
-	}
-	if tags.Domain == "" {
-		return amsTags{}, fmt.Errorf("missing required tag: d")
-	}
-	if tags.Headers == "" {
-		return amsTags{}, fmt.Errorf("missing required tag: h")
-	}
-	if tags.Selector == "" {
-		return amsTags{}, fmt.Errorf("missing required tag: s")
-	}
-
-	return tags, nil
+	return common.toAMSTags()
 }
 
 // asTags holds the parsed tags from an ARC-Seal header.
@@ -124,77 +46,11 @@ type asTags struct {
 
 // parseASTags parses the tag-value list from an ARC-Seal header.
 func parseASTags(s string) (asTags, error) {
-	tags := asTags{}
-	seen := make(map[string]bool)
-
-	pairs := splitTagValue(s)
-	for _, pair := range pairs {
-		key, value, ok := strings.Cut(pair, "=")
-		if !ok {
-			continue
-		}
-
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-
-		if seen[key] {
-			return asTags{}, fmt.Errorf("duplicate tag: %q", key)
-		}
-		seen[key] = true
-
-		switch key {
-		case "i":
-			i, err := parseInstanceValue(value)
-			if err != nil {
-				return asTags{}, err
-			}
-			tags.Instance = i
-		case "a":
-			tags.Algo = value
-		case "b":
-			sig, err := decodeBase64Value(value)
-			if err != nil {
-				return asTags{}, fmt.Errorf("invalid signature encoding: %w", err)
-			}
-			tags.Sig = sig
-		case "cv":
-			tags.CV = value
-		case "d":
-			tags.Domain = value
-		case "s":
-			tags.Selector = value
-		case "t":
-			ts, err := parseTimestampValue(value)
-			if err != nil {
-				return asTags{}, err
-			}
-			tags.Time = ts
-		case "h":
-			return asTags{}, fmt.Errorf("AS contains forbidden h= tag")
-		}
+	common, err := parseCommonTags(s)
+	if err != nil {
+		return asTags{}, err
 	}
-
-	// Validate required fields
-	if tags.Instance == 0 {
-		return asTags{}, fmt.Errorf("missing required tag: i")
-	}
-	if tags.Algo == "" {
-		return asTags{}, fmt.Errorf("missing required tag: a")
-	}
-	if len(tags.Sig) == 0 {
-		return asTags{}, fmt.Errorf("missing required tag: b")
-	}
-	if tags.CV == "" {
-		return asTags{}, fmt.Errorf("missing required tag: cv")
-	}
-	if tags.Domain == "" {
-		return asTags{}, fmt.Errorf("missing required tag: d")
-	}
-	if tags.Selector == "" {
-		return asTags{}, fmt.Errorf("missing required tag: s")
-	}
-
-	return tags, nil
+	return common.toASTags()
 }
 
 // keyRecordTags holds the parsed tags from a DKIM key record.
@@ -205,10 +61,40 @@ type keyRecordTags struct {
 	PubKey  []byte
 }
 
-// parseKeyRecordTags parses the tag-value list from a DKIM key record.
-func parseKeyRecordTags(s string) (keyRecordTags, error) {
-	tags := keyRecordTags{
-		KeyType: "rsa", // default per RFC 6376
+// commonTags holds the union of all possible tags that can appear in
+// ARC-Message-Signature, ARC-Seal, and DKIM key record headers.
+// This struct is parsed from raw tag-value strings without validation,
+// then converted to specific tag types via conversion methods.
+type commonTags struct {
+	// Common fields across AMS and AS
+	Instance int
+	Algo     string
+	Sig      []byte
+	Domain   string
+	Selector string
+	Time     time.Time
+
+	// AMS-specific fields
+	BodyHash []byte
+	Canon    string
+	Headers  string
+
+	// AS-specific fields
+	CV string
+
+	// Key record-specific fields
+	Version string
+	KeyType string
+	Hash    string
+	PubKey  []byte
+}
+
+// parseCommonTags parses a tag-value list into a commonTags struct without validation.
+// Duplicate tags return an error. Invalid base64 encodings or instance values return an error.
+// Missing or extra tags are not validated - use conversion methods for validation.
+func parseCommonTags(s string) (commonTags, error) {
+	tags := commonTags{
+		KeyType: "rsa", // default per RFC 6376 for key records
 	}
 	seen := make(map[string]bool)
 
@@ -216,39 +102,172 @@ func parseKeyRecordTags(s string) (keyRecordTags, error) {
 	for _, pair := range pairs {
 		key, value, ok := strings.Cut(pair, "=")
 		if !ok {
-			continue
+			continue // skip malformed pairs
 		}
 
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
 
 		if seen[key] {
-			return keyRecordTags{}, fmt.Errorf("duplicate tag: %q", key)
+			return commonTags{}, fmt.Errorf("duplicate tag: %q", key)
 		}
 		seen[key] = true
 
 		switch key {
-		case "v":
-			tags.Version = value
+		case "i":
+			i, err := parseInstanceValue(value)
+			if err != nil {
+				return commonTags{}, err
+			}
+			tags.Instance = i
+		case "a":
+			tags.Algo = value
+		case "b":
+			sig, err := decodeBase64Value(value)
+			if err != nil {
+				return commonTags{}, fmt.Errorf("invalid signature encoding: %w", err)
+			}
+			tags.Sig = sig
+		case "bh":
+			bh, err := decodeBase64Value(value)
+			if err != nil {
+				return commonTags{}, fmt.Errorf("invalid body hash encoding: %w", err)
+			}
+			tags.BodyHash = bh
+		case "c":
+			tags.Canon = value
+		case "cv":
+			tags.CV = value
+		case "d":
+			tags.Domain = value
+		case "h":
+			tags.Headers = value
+			tags.Hash = value
 		case "k":
 			tags.KeyType = value
-		case "h":
-			tags.Hash = value
 		case "p":
 			pubKey, err := decodeBase64Value(value)
 			if err != nil {
-				return keyRecordTags{}, fmt.Errorf("invalid public key encoding: %w", err)
+				return commonTags{}, fmt.Errorf("invalid public key encoding: %w", err)
 			}
 			tags.PubKey = pubKey
+		case "s":
+			tags.Selector = value
+		case "t":
+			ts, err := parseTimestampValue(value)
+			if err != nil {
+				return commonTags{}, err
+			}
+			tags.Time = ts
+		case "v":
+			tags.Version = value
 		}
 	}
 
+	return tags, nil
+}
+
+// toAMSTags converts commonTags to amsTags, validating all required fields.
+func (c commonTags) toAMSTags() (amsTags, error) {
 	// Validate required fields
-	if len(tags.PubKey) == 0 {
+	if c.Instance == 0 {
+		return amsTags{}, fmt.Errorf("missing required tag: i")
+	}
+	if c.Algo == "" {
+		return amsTags{}, fmt.Errorf("missing required tag: a")
+	}
+	if len(c.Sig) == 0 {
+		return amsTags{}, fmt.Errorf("missing required tag: b")
+	}
+	if len(c.BodyHash) == 0 {
+		return amsTags{}, fmt.Errorf("missing required tag: bh")
+	}
+	if c.Canon == "" {
+		return amsTags{}, fmt.Errorf("missing required tag: c")
+	}
+	if c.Domain == "" {
+		return amsTags{}, fmt.Errorf("missing required tag: d")
+	}
+	if c.Headers == "" {
+		return amsTags{}, fmt.Errorf("missing required tag: h")
+	}
+	if c.Selector == "" {
+		return amsTags{}, fmt.Errorf("missing required tag: s")
+	}
+
+	return amsTags{
+		Instance: c.Instance,
+		Algo:     c.Algo,
+		Sig:      c.Sig,
+		BodyHash: c.BodyHash,
+		Canon:    c.Canon,
+		Domain:   c.Domain,
+		Headers:  c.Headers,
+		Selector: c.Selector,
+		Time:     c.Time,
+	}, nil
+}
+
+// toASTags converts commonTags to asTags, validating all required fields.
+func (c commonTags) toASTags() (asTags, error) {
+	// Check for forbidden fields
+	if c.Headers != "" {
+		return asTags{}, fmt.Errorf("AS contains forbidden h= tag")
+	}
+
+	// Validate required fields
+	if c.Instance == 0 {
+		return asTags{}, fmt.Errorf("missing required tag: i")
+	}
+	if c.Algo == "" {
+		return asTags{}, fmt.Errorf("missing required tag: a")
+	}
+	if len(c.Sig) == 0 {
+		return asTags{}, fmt.Errorf("missing required tag: b")
+	}
+	if c.CV == "" {
+		return asTags{}, fmt.Errorf("missing required tag: cv")
+	}
+	if c.Domain == "" {
+		return asTags{}, fmt.Errorf("missing required tag: d")
+	}
+	if c.Selector == "" {
+		return asTags{}, fmt.Errorf("missing required tag: s")
+	}
+
+	return asTags{
+		Instance: c.Instance,
+		Algo:     c.Algo,
+		Sig:      c.Sig,
+		CV:       c.CV,
+		Domain:   c.Domain,
+		Selector: c.Selector,
+		Time:     c.Time,
+	}, nil
+}
+
+// toKeyRecordTags converts commonTags to keyRecordTags, validating all required fields.
+func (c commonTags) toKeyRecordTags() (keyRecordTags, error) {
+	// Validate required fields
+	if len(c.PubKey) == 0 {
 		return keyRecordTags{}, fmt.Errorf("missing required tag: p")
 	}
 
-	return tags, nil
+	return keyRecordTags{
+		Version: c.Version,
+		KeyType: c.KeyType,
+		Hash:    c.Hash,
+		PubKey:  c.PubKey,
+	}, nil
+}
+
+// parseKeyRecordTags parses the tag-value list from a DKIM key record.
+func parseKeyRecordTags(s string) (keyRecordTags, error) {
+	common, err := parseCommonTags(s)
+	if err != nil {
+		return keyRecordTags{}, err
+	}
+	return common.toKeyRecordTags()
 }
 
 // splitTagValue splits a semicolon-delimited tag-value list into pairs.
