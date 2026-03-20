@@ -60,7 +60,6 @@
 //	validator := arc.NewValidator(arc.WithMinRSAKeyBits(2048))
 //	signer, err := arc.NewSigner(privateKey, "sel._domainkey.example.org",
 //		arc.WithValidator(validator))
-//
 package arc
 
 import (
@@ -384,4 +383,3 @@ func (o minRSAKeyBits) applyValidator(v *Validator) {
 func WithMinRSAKeyBits(bits int) ValidatorOption {
 	return minRSAKeyBits{bits: bits}
 }
-

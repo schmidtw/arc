@@ -263,7 +263,6 @@ func TestSignerValidatorMinBits(t *testing.T) {
 	require.Equal(t, chainFail, sets[1].Seal.ChainValidation)
 }
 
-
 func TestEndToEndSignThenValidate(t *testing.T) {
 	// End-to-end test: sign a message twice with different keys, then validate.
 	ctx := context.Background()
