@@ -42,7 +42,6 @@ func parseMessage(r io.Reader) (*message, error) {
 func extractHeaderLines(raw []byte) ([]string, int, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(raw))
 	var headerLines []string
-	var inBody bool
 	var bodyStart int
 
 	pos := 0
@@ -54,14 +53,12 @@ func extractHeaderLines(raw []byte) ([]string, int, error) {
 			lineLen = len(line) + 2
 		}
 
-		if !inBody {
-			if line == "" || line == "\r" {
-				inBody = true
-				bodyStart = pos + lineLen
-			} else {
-				headerLines = append(headerLines, line)
-			}
+		if line == "" || line == "\r" {
+			// Found blank line separating headers from body
+			bodyStart = pos + lineLen
+			break
 		}
+		headerLines = append(headerLines, line)
 		pos += lineLen
 	}
 

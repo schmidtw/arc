@@ -290,6 +290,24 @@ func TestParseMessageHeadersAndBody(t *testing.T) {
 	assert.Contains(t, string(parsed.Body), "Body content here.")
 }
 
+func TestParseMessageWithLongBodyLine(t *testing.T) {
+	// Test that messages with very long body lines don't cause scanner failures.
+	// bufio.Scanner has a default token limit of 64KB, which could cause failures
+	// if we continued scanning the body after finding headers.
+	longLine := strings.Repeat("A", 100000) // 100KB line, exceeds scanner default
+	msg := "From: test@example.com\r\nSubject: Test\r\n\r\n" + longLine + "\r\n"
+
+	parsed, err := parseMessage(strings.NewReader(msg))
+	require.NoError(t, err)
+
+	require.Len(t, parsed.Headers, 2)
+	assert.Equal(t, "From", parsed.Headers[0].Key)
+	assert.Equal(t, "Subject", parsed.Headers[1].Key)
+
+	// Body should contain the long line
+	assert.Contains(t, string(parsed.Body), longLine)
+}
+
 func TestSerializeAARRoundTrip(t *testing.T) {
 	s := Signer{
 		authServID: "lists.example.org",
