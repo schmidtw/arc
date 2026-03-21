@@ -82,6 +82,10 @@ func (c *commonTags) parseTag(key, value string) error { // nolint:funlen
 	case "d":
 		c.Domain = value
 	case "h":
+		// Note: "h=" has different meanings depending on context:
+		// - In AMS headers: signed header fields list (colon-separated: "from:to:subject")
+		// - In DNS key records: acceptable hash algorithms (colon-separated: "sha256:sha1")
+		// We set both fields here; conversion methods (toAMS/toKeyRecordTags) use the appropriate one.
 		c.Headers = parseHeaderList(value)
 		c.Hash = value
 	case "k":

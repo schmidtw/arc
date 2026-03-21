@@ -420,14 +420,26 @@ func (o maxCacheSize) applyValidator(v *Validator) {
 // This option can be passed to [NewValidator].
 //
 // The cache uses LRU (Least Recently Used) eviction when the limit is reached.
-// Set to 0 to disable caching entirely. Set to -1 for unlimited cache size
-// (not recommended for long-running services).
+//
+// Accepted values:
+//   - 0: Disables caching entirely (always performs DNS lookups)
+//   - Positive integers: Cache up to that many entries with LRU eviction
+//   - -1 or any negative value: Unlimited cache size (all negative values are normalized to -1)
+//
+// Warning: Unlimited cache (-1) is not recommended for long-running services as it
+// can lead to unbounded memory growth.
 //
 // Default is 1000 entries, which should be sufficient for most use cases while
 // preventing unbounded memory growth in long-running validators.
+//
+// Note: The cache does not respect DNS TTL values because Go's [net.Resolver]
+// does not expose TTL information from DNS responses. Cached entries are evicted
+// only by LRU policy or when the DNS record content changes. If you require
+// strict TTL-based expiration (e.g., for rapid key revocation scenarios), either
+// disable caching with WithMaxCacheSize(0) or periodically recreate the Validator.
 func WithMaxCacheSize(size int) ValidatorOption {
 	if size < 0 {
-		size = -1
+		size = -1 // Normalize any negative value to -1 (unlimited)
 	}
 	return maxCacheSize{size: size}
 }

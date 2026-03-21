@@ -163,6 +163,8 @@ func (v *Validator) evictLRU() {
 }
 
 // cacheAdd adds a new entry to the cache with LRU tracking.
+// Note: We don't store or respect DNS TTL because net.Resolver doesn't expose it.
+// Entries are evicted by LRU policy or when content changes (detected on lookup).
 func (v *Validator) cacheAdd(domainKey, record string, verify verifyFunc) {
 	// Skip caching if disabled.
 	if v.maxCacheSize == 0 {
@@ -186,6 +188,10 @@ func (v *Validator) cacheAdd(domainKey, record string, verify verifyFunc) {
 // checkCache checks if a cached verifier exists for the given domain key and record.
 // Returns the cached verifier if found and still valid, nil otherwise.
 // Must be called with caching enabled (maxCacheSize != 0).
+//
+// Cache invalidation is content-based rather than TTL-based: if the DNS record
+// content has changed since caching, the old entry is removed and nil is returned.
+// This detects key rotations but not TTL expirations.
 func (v *Validator) checkCache(domainKey, record string) verifyFunc {
 	v.m.Lock()
 	defer v.m.Unlock()

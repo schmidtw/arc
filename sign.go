@@ -86,6 +86,12 @@ func (s *Signer) signMessage(ctx context.Context, msg *message, authResults stri
 		if highest.Seal != nil && highest.Seal.ChainValidation == chainFail {
 			return nil, fmt.Errorf("cannot seal: most recent ARC-Seal has cv=fail")
 		}
+		// Validate the existing chain to determine the cv value for our new seal.
+		// Per RFC 8617 Section 5.1.2, if validation fails for ANY reason (bad
+		// signatures, DNS failures, key size issues, etc.), we create a cv=fail
+		// seal. The error itself doesn't prevent sealing - only a pre-existing
+		// cv=fail does (checked above). A cv=fail seal only signs the new ARC Set,
+		// not the broken chain (see generateAS).
 		cv, _ = s.validator.validateMessage(ctx, msg)
 	}
 
