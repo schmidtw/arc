@@ -75,58 +75,36 @@ func parseAAR(raw string) (*aar, error) {
 func parseAMS(raw string) (*ams, error) {
 	val := unfoldHeader(raw)
 
-	tags, err := parseAMSTags(val)
+	common, err := parseCommonTags(val)
 	if err != nil {
 		return nil, fmt.Errorf("parsing AMS: %w", err)
 	}
 
-	// Validate canonicalization. We only support relaxed/relaxed. Per DKIM
-	// (RFC 6376 Section 3.5), the default when c= is absent is simple/simple,
-	// which we do not implement.
-	cVal := strings.TrimSpace(tags.Canon)
-	if cVal != "relaxed/relaxed" {
-		return nil, fmt.Errorf("AMS unsupported canonicalization %q: only relaxed/relaxed is supported", cVal)
+	result, err := common.toAMS()
+	if err != nil {
+		return nil, fmt.Errorf("parsing AMS: %w", err)
 	}
 
-	headers := parseHeaderList(tags.Headers)
-
-	return &ams{
-		Instance:  tags.Instance,
-		Algorithm: strings.TrimSpace(tags.Algo),
-		Signature: tags.Sig,
-		BodyHash:  tags.BodyHash,
-		Domain:    strings.TrimSpace(tags.Domain),
-		Headers:   headers,
-		Selector:  strings.TrimSpace(tags.Selector),
-		Timestamp: tags.Time,
-		Raw:       raw,
-	}, nil
+	result.Raw = raw
+	return result, nil
 }
 
 // parseArcSeal parses an ARC-Seal header field value.
 func parseArcSeal(raw string) (*arcSeal, error) {
 	val := unfoldHeader(raw)
 
-	tags, err := parseASTags(val)
+	common, err := parseCommonTags(val)
 	if err != nil {
 		return nil, fmt.Errorf("parsing AS: %w", err)
 	}
 
-	cv := strings.TrimSpace(tags.CV)
-	if cv != "none" && cv != "pass" && cv != "fail" {
-		return nil, fmt.Errorf("AS invalid cv value: %q", cv)
+	result, err := common.toAS()
+	if err != nil {
+		return nil, fmt.Errorf("parsing AS: %w", err)
 	}
 
-	return &arcSeal{
-		Instance:        tags.Instance,
-		Algorithm:       strings.TrimSpace(tags.Algo),
-		Signature:       tags.Sig,
-		ChainValidation: chainStatus(cv),
-		Domain:          strings.TrimSpace(tags.Domain),
-		Selector:        strings.TrimSpace(tags.Selector),
-		Timestamp:       tags.Time,
-		Raw:             raw,
-	}, nil
+	result.Raw = raw
+	return result, nil
 }
 
 // parseHeaderList splits a colon-separated list of header names.

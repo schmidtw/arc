@@ -11,48 +11,6 @@ import (
 	"time"
 )
 
-// amsTags holds the parsed tags from an ARC-Message-Signature header.
-type amsTags struct {
-	Instance int
-	Algo     string
-	Sig      []byte
-	BodyHash []byte
-	Canon    string
-	Domain   string
-	Headers  string
-	Selector string
-	Time     time.Time // optional, zero value if not present
-}
-
-// parseAMSTags parses the tag-value list from an ARC-Message-Signature header.
-func parseAMSTags(s string) (amsTags, error) {
-	common, err := parseCommonTags(s)
-	if err != nil {
-		return amsTags{}, err
-	}
-	return common.toAMSTags()
-}
-
-// asTags holds the parsed tags from an ARC-Seal header.
-type asTags struct {
-	Instance int
-	Algo     string
-	Sig      []byte
-	CV       string
-	Domain   string
-	Selector string
-	Time     time.Time // optional, zero value if not present
-}
-
-// parseASTags parses the tag-value list from an ARC-Seal header.
-func parseASTags(s string) (asTags, error) {
-	common, err := parseCommonTags(s)
-	if err != nil {
-		return asTags{}, err
-	}
-	return common.toASTags()
-}
-
 // keyRecordTags holds the parsed tags from a DKIM key record.
 type keyRecordTags struct {
 	Version string // optional, empty if not present
@@ -77,10 +35,10 @@ type commonTags struct {
 	// AMS-specific fields
 	BodyHash []byte
 	Canon    string
-	Headers  string
+	Headers  []string
 
 	// AS-specific fields
-	CV string
+	CV chainStatus
 
 	// Key record-specific fields
 	Version string
@@ -90,13 +48,16 @@ type commonTags struct {
 }
 
 // parseTag parses a single tag key-value pair and updates the commonTags struct.
-func (c *commonTags) parseTag(key, value string) error {
+func (c *commonTags) parseTag(key, value string) error { // nolint:funlen
 	var err error
 
 	switch key {
 	case "i":
 		c.Instance, err = parseInstanceValue(value)
 	case "a":
+		if value != algRSASHA256 && value != algEd25519SHA256 {
+			return fmt.Errorf("unsupported algorithm %q", value)
+		}
 		c.Algo = value
 	case "b":
 		c.Sig, err = decodeBase64Value(value)
@@ -109,13 +70,20 @@ func (c *commonTags) parseTag(key, value string) error {
 			err = fmt.Errorf("invalid body hash encoding: %w", err)
 		}
 	case "c":
+		if value != "relaxed/relaxed" {
+			return fmt.Errorf("unsupported canonicalization %q: only relaxed/relaxed is supported", value)
+		}
 		c.Canon = value
 	case "cv":
-		c.CV = value
+		if value != "none" && value != "pass" && value != "fail" {
+			return fmt.Errorf("invalid cv value: %q", value)
+		}
+		c.CV = chainStatus(value)
 	case "d":
 		c.Domain = value
 	case "h":
-		c.Headers, c.Hash = value, value
+		c.Headers = parseHeaderList(value)
+		c.Hash = value
 	case "k":
 		c.KeyType = value
 	case "p":
@@ -165,82 +133,82 @@ func parseCommonTags(s string) (commonTags, error) {
 	return tags, nil
 }
 
-// toAMSTags converts commonTags to amsTags, validating all required fields.
-func (c commonTags) toAMSTags() (amsTags, error) {
+// toAMS converts commonTags to ams, validating all required fields.
+func (c commonTags) toAMS() (*ams, error) {
 	// Validate required fields
 	if c.Instance == 0 {
-		return amsTags{}, fmt.Errorf("missing required tag: i")
+		return nil, fmt.Errorf("missing required tag: i")
 	}
 	if c.Algo == "" {
-		return amsTags{}, fmt.Errorf("missing required tag: a")
+		return nil, fmt.Errorf("missing required tag: a")
 	}
 	if len(c.Sig) == 0 {
-		return amsTags{}, fmt.Errorf("missing required tag: b")
+		return nil, fmt.Errorf("missing required tag: b")
 	}
 	if len(c.BodyHash) == 0 {
-		return amsTags{}, fmt.Errorf("missing required tag: bh")
+		return nil, fmt.Errorf("missing required tag: bh")
 	}
 	if c.Canon == "" {
-		return amsTags{}, fmt.Errorf("missing required tag: c")
+		return nil, fmt.Errorf("missing required tag: c")
 	}
 	if c.Domain == "" {
-		return amsTags{}, fmt.Errorf("missing required tag: d")
+		return nil, fmt.Errorf("missing required tag: d")
 	}
-	if c.Headers == "" {
-		return amsTags{}, fmt.Errorf("missing required tag: h")
+	if len(c.Headers) == 0 {
+		return nil, fmt.Errorf("missing required tag: h")
 	}
 	if c.Selector == "" {
-		return amsTags{}, fmt.Errorf("missing required tag: s")
+		return nil, fmt.Errorf("missing required tag: s")
 	}
 
-	return amsTags{
-		Instance: c.Instance,
-		Algo:     c.Algo,
-		Sig:      c.Sig,
-		BodyHash: c.BodyHash,
-		Canon:    c.Canon,
-		Domain:   c.Domain,
-		Headers:  c.Headers,
-		Selector: c.Selector,
-		Time:     c.Time,
+	return &ams{
+		Instance:  c.Instance,
+		Algorithm: c.Algo,
+		Signature: c.Sig,
+		BodyHash:  c.BodyHash,
+		Canon:     c.Canon,
+		Domain:    c.Domain,
+		Headers:   c.Headers,
+		Selector:  c.Selector,
+		Timestamp: c.Time,
 	}, nil
 }
 
-// toASTags converts commonTags to asTags, validating all required fields.
-func (c commonTags) toASTags() (asTags, error) {
+// toAS converts commonTags to arcSeal, validating all required fields.
+func (c commonTags) toAS() (*arcSeal, error) {
 	// Check for forbidden fields
-	if c.Headers != "" {
-		return asTags{}, fmt.Errorf("AS contains forbidden h= tag")
+	if len(c.Headers) != 0 {
+		return nil, fmt.Errorf("AS contains forbidden h= tag")
 	}
 
 	// Validate required fields
 	if c.Instance == 0 {
-		return asTags{}, fmt.Errorf("missing required tag: i")
+		return nil, fmt.Errorf("missing required tag: i")
 	}
 	if c.Algo == "" {
-		return asTags{}, fmt.Errorf("missing required tag: a")
+		return nil, fmt.Errorf("missing required tag: a")
 	}
 	if len(c.Sig) == 0 {
-		return asTags{}, fmt.Errorf("missing required tag: b")
+		return nil, fmt.Errorf("missing required tag: b")
 	}
 	if c.CV == "" {
-		return asTags{}, fmt.Errorf("missing required tag: cv")
+		return nil, fmt.Errorf("missing required tag: cv")
 	}
 	if c.Domain == "" {
-		return asTags{}, fmt.Errorf("missing required tag: d")
+		return nil, fmt.Errorf("missing required tag: d")
 	}
 	if c.Selector == "" {
-		return asTags{}, fmt.Errorf("missing required tag: s")
+		return nil, fmt.Errorf("missing required tag: s")
 	}
 
-	return asTags{
-		Instance: c.Instance,
-		Algo:     c.Algo,
-		Sig:      c.Sig,
-		CV:       c.CV,
-		Domain:   c.Domain,
-		Selector: c.Selector,
-		Time:     c.Time,
+	return &arcSeal{
+		Instance:        c.Instance,
+		Algorithm:       c.Algo,
+		Signature:       c.Sig,
+		ChainValidation: c.CV,
+		Domain:          c.Domain,
+		Selector:        c.Selector,
+		Timestamp:       c.Time,
 	}, nil
 }
 
@@ -309,7 +277,7 @@ func parseTimestampValue(value string) (time.Time, error) {
 	if value == "" {
 		return time.Time{}, nil
 	}
-	ts, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	ts, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("invalid timestamp %q: %w", value, err)
 	}

@@ -103,6 +103,7 @@ type ams struct {
 	Algorithm string    // Signing algorithm (a= tag)
 	Signature []byte    // Decoded signature (b= tag)
 	BodyHash  []byte    // Decoded body hash (bh= tag)
+	Canon     string    // Canonicalization algorithm (c= tag, used for validation)
 	Domain    string    // Signing domain (d= tag)
 	Headers   []string  // Signed header fields (h= tag)
 	Selector  string    // Key selector (s= tag)
