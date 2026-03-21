@@ -310,7 +310,7 @@ func TestCacheSizeZeroVsNegativeOne(t *testing.T) {
 	resolver := newTestCacheResolver()
 
 	t.Run("maxCacheSize=0 disables caching", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		v, err := NewValidator(WithResolver(resolver), WithMaxCacheSize(0))
 		require.NoError(t, err)
 		assert.Equal(t, 0, v.maxCacheSize)
@@ -328,7 +328,7 @@ func TestCacheSizeZeroVsNegativeOne(t *testing.T) {
 	})
 
 	t.Run("maxCacheSize=-1 enables unbounded caching", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		v, err := NewValidator(WithResolver(resolver), WithMaxCacheSize(-1))
 		require.NoError(t, err)
 		assert.Equal(t, -1, v.maxCacheSize)

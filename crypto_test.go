@@ -204,7 +204,7 @@ func TestSignatureVerificationFailures(t *testing.T) {
 func TestRSAWeakKeyRejected(t *testing.T) {
 	t.Parallel()
 	t.Run("boundary 1024-bit key accepted", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		key, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // Testing weak keys
 		require.NoError(t, err)
 
@@ -239,7 +239,7 @@ func TestRSAWeakKeyRejected(t *testing.T) {
 func TestAlgorithmValidation(t *testing.T) {
 	t.Parallel()
 	t.Run("unsupported algorithm on verify", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		key, err := rsa.GenerateKey(rand.Reader, 2048)
 		require.NoError(t, err)
 

@@ -180,7 +180,7 @@ func TestSignUnsupportedKeyType(t *testing.T) {
 func TestSignerMinRSAKeyBits(t *testing.T) {
 	t.Parallel()
 	t.Run("512-bit option rejected", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		key := getRSATestKey(t, 2048)
 		s, err := NewSigner(key, "sel._domainkey.example.org",
 			WithMinRSAKeyBits(512))
@@ -190,7 +190,7 @@ func TestSignerMinRSAKeyBits(t *testing.T) {
 
 	// Test that the signer enforces a minimum of 2048 bits for RSA keys.
 	t.Run("1024-bit key rejected", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		key := getRSATestKey(t, 1024)
 
 		resolver := &mapResolver{
@@ -209,7 +209,7 @@ func TestSignerMinRSAKeyBits(t *testing.T) {
 	})
 
 	t.Run("2048-bit key accepted", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		key := getRSATestKey(t, 2048)
 
 		resolver := &mapResolver{

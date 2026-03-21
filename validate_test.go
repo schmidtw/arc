@@ -302,7 +302,7 @@ func TestValidatorMaxArcSets(t *testing.T) {
 	resolver := &mapResolver{records: map[string]string{}}
 
 	t.Run("exceeds max (51 sets)", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		// Build a message with 51 ARC sets - exceeds the RFC 8617 limit of 50.
 		// This should fail during parsing when i=51 is encountered.
 		var headers strings.Builder
@@ -327,7 +327,7 @@ func TestValidatorMaxArcSets(t *testing.T) {
 	})
 
 	t.Run("within max (50 sets)", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		// Build a message with 50 ARC sets - exactly at the RFC 8617 limit.
 		// This should parse successfully (though will fail signature verification).
 		var headers strings.Builder

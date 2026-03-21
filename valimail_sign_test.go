@@ -76,7 +76,7 @@ func TestValimailSignSuite(t *testing.T) {
 
 		for name, tc := range suite.Tests {
 			t.Run(name, func(t *testing.T) {
-			t.Parallel()
+				t.Parallel()
 				// Skip tests where expected output is empty (no signing expected).
 				expectedAS := strings.TrimSpace(tc.AS)
 				expectedAMS := strings.TrimSpace(tc.AMS)
