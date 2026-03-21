@@ -183,40 +183,81 @@ func (v *Validator) cacheAdd(domainKey, record string, verify verifyFunc) {
 	}
 }
 
+// checkCache checks if a cached verifier exists for the given domain key and record.
+// Returns the cached verifier if found and still valid, nil otherwise.
+// Must be called with caching enabled (maxCacheSize != 0).
+func (v *Validator) checkCache(domainKey, record string) verifyFunc {
+	v.m.Lock()
+	defer v.m.Unlock()
+
+	cached, ok := v.sigCache[domainKey]
+	if !ok {
+		return nil
+	}
+
+	if cached.txt != record {
+		// Record changed since last lookup. Remove stale entry.
+		if cached.element != nil {
+			v.cacheList.Remove(cached.element)
+		}
+		delete(v.sigCache, domainKey)
+		return nil
+	}
+
+	// Cache hit: move to front (most recently used).
+	if cached.element != nil {
+		v.cacheList.MoveToFront(cached.element)
+	}
+	return cached.verify
+}
+
+// storeInCache stores a verifier in the cache with double-check for race conditions.
+// Returns the verifier to use (either the newly stored one or one from another goroutine).
+// Must be called with caching enabled (maxCacheSize != 0).
+func (v *Validator) storeInCache(domainKey, record string, verify verifyFunc) verifyFunc {
+	v.m.Lock()
+	defer v.m.Unlock()
+
+	// Double-check: another goroutine may have cached this while we were building.
+	if cached, ok := v.sigCache[domainKey]; ok {
+		if cached.txt == record {
+			// Use the already-cached result.
+			if cached.element != nil {
+				v.cacheList.MoveToFront(cached.element)
+			}
+			return cached.verify
+		}
+		// DNS record changed; remove old entry before adding new one.
+		if cached.element != nil {
+			v.cacheList.Remove(cached.element)
+		}
+		delete(v.sigCache, domainKey)
+	}
+
+	v.cacheAdd(domainKey, record, verify)
+	return verify
+}
+
 // lookupKey retrieves a verification function for the given domain and selector
 // via DNS TXT record lookup.
 func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (verifyFunc, error) {
 	domainKey := makeDomainkey(selector, domain)
+
+	// Perform DNS lookup.
 	records, err := v.resolver.LookupTXT(ctx, domainKey)
 	if err != nil {
 		return nil, fmt.Errorf("DNS lookup for %q: %w", domainKey, err)
 	}
-
 	if len(records) == 0 {
 		return nil, fmt.Errorf("no TXT records found for %q", domainKey)
 	}
-
 	record := strings.Join(records, "")
 
-	// Check cache under lock (unless caching is disabled).
+	// Check cache if enabled.
 	if v.maxCacheSize != 0 {
-		v.m.Lock()
-		if cached, ok := v.sigCache[domainKey]; ok {
-			if cached.txt == record {
-				// Cache hit: move to front (most recently used) and return.
-				if cached.element != nil {
-					v.cacheList.MoveToFront(cached.element)
-				}
-				v.m.Unlock()
-				return cached.verify, nil
-			}
-			// Cache miss: record changed since last lookup. Remove old cache entry.
-			if cached.element != nil {
-				v.cacheList.Remove(cached.element)
-			}
-			delete(v.sigCache, domainKey)
+		if cached := v.checkCache(domainKey, record); cached != nil {
+			return cached, nil
 		}
-		v.m.Unlock()
 	}
 
 	// Parse and build verifier outside lock to reduce contention.
@@ -230,20 +271,9 @@ func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (ver
 		return nil, err
 	}
 
-	// Store in cache with a second lock and double-check (unless caching is disabled).
+	// Store in cache if enabled.
 	if v.maxCacheSize != 0 {
-		v.m.Lock()
-		defer v.m.Unlock()
-
-		if cached, ok := v.sigCache[domainKey]; ok && cached.txt == record {
-			// Another goroutine beat us to it. Use their cached result.
-			if cached.element != nil {
-				v.cacheList.MoveToFront(cached.element)
-			}
-			return cached.verify, nil
-		}
-
-		v.cacheAdd(domainKey, record, verify)
+		verify = v.storeInCache(domainKey, record, verify)
 	}
 
 	return verify, nil
