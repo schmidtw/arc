@@ -5,8 +5,13 @@ package arc
 
 import (
 	"bytes"
+	"container/list"
 	"context"
 	"crypto"
+	"crypto/ed25519"
+	"crypto/rsa"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -47,8 +52,8 @@ func (v *Validator) validateMessage(ctx context.Context, msg *message) (chainSta
 	n := len(sets)
 
 	// Step 1: Check max instance limit.
-	if n > MaxInstance {
-		return chainFail, fmt.Errorf("instance count %d exceeds maximum %d", n, MaxInstance)
+	if n > v.maxArcSets {
+		return chainFail, fmt.Errorf("instance count %d exceeds maximum %d", n, v.maxArcSets)
 	}
 
 	// Step 2: If the highest instance is already marked as failing, result is fail.
@@ -112,28 +117,180 @@ func validateStructure(sets []*arcSet) error {
 	return nil
 }
 
-// lookupKey retrieves the public key for the given domain and selector
+// buildVerifier creates a verifyFunc for the given public key.
+func (v *Validator) buildVerifier(key crypto.PublicKey, domainKey string) (verifyFunc, error) {
+	switch k := key.(type) {
+	case *rsa.PublicKey:
+		if k.N.BitLen() < v.minBits {
+			return nil, fmt.Errorf("%w: %d bits (minimum %d)", ErrRSAKeyTooSmall, k.N.BitLen(), v.minBits)
+		}
+		return func(algorithm string, data, signature []byte) error {
+			if algorithm != algRSASHA256 {
+				return fmt.Errorf("algorithm mismatch: expected %s, got %s", algRSASHA256, algorithm)
+			}
+			hash := sha256.Sum256(data)
+			if err := rsa.VerifyPKCS1v15(k, crypto.SHA256, hash[:], signature); err != nil {
+				return errors.Join(ErrInvalidSignature, err)
+			}
+			return nil
+		}, nil
+	case ed25519.PublicKey:
+		return func(algorithm string, data, signature []byte) error {
+			if algorithm != algEd25519SHA256 {
+				return fmt.Errorf("algorithm mismatch: expected %s, got %s", algEd25519SHA256, algorithm)
+			}
+			hash := sha256.Sum256(data)
+			if !ed25519.Verify(k, hash[:], signature) {
+				return errors.Join(ErrInvalidSignature,
+					fmt.Errorf("ed25519 signature verification failed"))
+			}
+			return nil
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported key type %T for %q", key, domainKey)
+	}
+}
+
+// evictLRU removes the least recently used cache entry if at capacity.
+func (v *Validator) evictLRU() {
+	if v.maxCacheSize > 0 && len(v.sigCache) >= v.maxCacheSize {
+		if elem := v.cacheList.Back(); elem != nil {
+			entry := elem.Value.(*cacheEntry)
+			delete(v.sigCache, entry.key)
+			v.cacheList.Remove(elem)
+		}
+	}
+}
+
+// cacheAdd adds a new entry to the cache with LRU tracking.
+// The cache stores the parsed verifier to avoid expensive crypto operations on
+// repeated validations. DNS lookups still occur on every validation; the cache
+// only skips re-parsing when the DNS record content hasn't changed.
+func (v *Validator) cacheAdd(domainKey, record string, verify verifyFunc) {
+	// Skip caching if disabled.
+	if v.maxCacheSize == 0 {
+		return
+	}
+
+	v.evictLRU()
+
+	var element *list.Element
+	if v.maxCacheSize > 0 {
+		element = v.cacheList.PushFront(&cacheEntry{key: domainKey})
+	}
+
+	v.sigCache[domainKey] = txtKey{
+		txt:     record,
+		verify:  verify,
+		element: element,
+	}
+}
+
+// checkCache checks if a cached verifier exists for the given domain key and record.
+// Returns the cached verifier if the DNS record content matches the cached version,
+// nil otherwise. Must be called with caching enabled (maxCacheSize != 0).
+//
+// The record parameter is the freshly fetched DNS TXT record. If it matches what's
+// cached, we return the cached verifier (avoiding expensive parsing and crypto
+// operations). If the record has changed, we remove the stale entry and return nil.
+func (v *Validator) checkCache(domainKey, record string) verifyFunc {
+	v.m.Lock()
+	defer v.m.Unlock()
+
+	cached, ok := v.sigCache[domainKey]
+	if !ok {
+		return nil
+	}
+
+	if cached.txt != record {
+		// Record changed since last lookup. Remove stale entry.
+		if cached.element != nil {
+			v.cacheList.Remove(cached.element)
+		}
+		delete(v.sigCache, domainKey)
+		return nil
+	}
+
+	// Cache hit: move to front (most recently used).
+	if cached.element != nil {
+		v.cacheList.MoveToFront(cached.element)
+	}
+	return cached.verify
+}
+
+// storeInCache stores a verifier in the cache with double-check for race conditions.
+// Returns the verifier to use (either the newly stored one or one from another goroutine).
+// Must be called with caching enabled (maxCacheSize != 0).
+func (v *Validator) storeInCache(domainKey, record string, verify verifyFunc) verifyFunc {
+	v.m.Lock()
+	defer v.m.Unlock()
+
+	// Double-check: another goroutine may have cached this while we were building.
+	if cached, ok := v.sigCache[domainKey]; ok {
+		if cached.txt == record {
+			// Use the already-cached result.
+			if cached.element != nil {
+				v.cacheList.MoveToFront(cached.element)
+			}
+			return cached.verify
+		}
+		// DNS record changed; remove old entry before adding new one.
+		if cached.element != nil {
+			v.cacheList.Remove(cached.element)
+		}
+		delete(v.sigCache, domainKey)
+	}
+
+	v.cacheAdd(domainKey, record, verify)
+	return verify
+}
+
+// lookupKey retrieves a verification function for the given domain and selector
 // via DNS TXT record lookup.
-func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (crypto.PublicKey, error) {
-	domainKey := selector + "._domainkey." + domain
+func (v *Validator) lookupKey(ctx context.Context, domain, selector string) (verifyFunc, error) {
+	domainKey := makeDomainkey(selector, domain)
+
+	// Perform DNS lookup.
 	records, err := v.resolver.LookupTXT(ctx, domainKey)
 	if err != nil {
 		return nil, fmt.Errorf("DNS lookup for %q: %w", domainKey, err)
 	}
-
 	if len(records) == 0 {
 		return nil, fmt.Errorf("no TXT records found for %q", domainKey)
 	}
-
 	record := strings.Join(records, "")
-	return ParseKeyRecord(record)
+
+	// Check cache if enabled.
+	if v.maxCacheSize != 0 {
+		if cached := v.checkCache(domainKey, record); cached != nil {
+			return cached, nil
+		}
+	}
+
+	// Parse and build verifier outside lock to reduce contention.
+	key, err := parseKeyRecord(record)
+	if err != nil {
+		return nil, fmt.Errorf("parsing key record for %q: %w", domainKey, err)
+	}
+
+	verify, err := v.buildVerifier(key, domainKey)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store in cache if enabled.
+	if v.maxCacheSize != 0 {
+		verify = v.storeInCache(domainKey, record, verify)
+	}
+
+	return verify, nil
 }
 
 // verifyAMS verifies an ARC-Message-Signature by checking the body hash
 // and verifying the cryptographic signature against the DNS public key.
 func (v *Validator) verifyAMS(ctx context.Context, msg *message, ams *ams) error {
 	// Look up the public key.
-	pk, err := v.lookupKey(ctx, ams.Domain, ams.Selector)
+	verify, err := v.lookupKey(ctx, ams.Domain, ams.Selector)
 	if err != nil {
 		return fmt.Errorf("key lookup for AMS i=%d: %w", ams.Instance, err)
 	}
@@ -147,7 +304,7 @@ func (v *Validator) verifyAMS(ctx context.Context, msg *message, ams *ams) error
 	// Build the data to verify: canonicalized signed headers + the AMS header.
 	data := buildAMSSignedData(msg, ams)
 
-	return verify(pk, ams.Algorithm, data, ams.Signature)
+	return verify(ams.Algorithm, data, ams.Signature)
 }
 
 // buildAMSSignedData builds the data that was signed by the ARC-Message-Signature.
@@ -189,14 +346,14 @@ func buildAMSSignedData(msg *message, ams *ams) []byte {
 func (v *Validator) verifyAS(ctx context.Context, msg *message, sets []*arcSet, idx int) error {
 	as := sets[idx].Seal
 
-	pk, err := v.lookupKey(ctx, as.Domain, as.Selector)
+	verify, err := v.lookupKey(ctx, as.Domain, as.Selector)
 	if err != nil {
 		return fmt.Errorf("key lookup for AS i=%d: %w", as.Instance, err)
 	}
 
 	data := buildASSignedData(msg, sets, idx)
 
-	return verify(pk, as.Algorithm, data, as.Signature)
+	return verify(as.Algorithm, data, as.Signature)
 }
 
 // buildASSignedData builds the data that was signed by the ARC-Seal at index idx.

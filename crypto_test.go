@@ -8,15 +8,56 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"errors"
+	"fmt"
+	"math/big"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
+// newVerifyFunc creates a verifyFunc from a public key, mirroring the closures
+// built by lookupKey. This lets unit tests exercise sign+verify without DNS.
+func newVerifyFunc(t *testing.T, pubKey crypto.PublicKey) verifyFunc {
+	t.Helper()
+	switch k := pubKey.(type) {
+	case *rsa.PublicKey:
+		return func(algorithm string, data, signature []byte) error {
+			if algorithm != algRSASHA256 {
+				return fmt.Errorf("algorithm mismatch: expected %s, got %s", algRSASHA256, algorithm)
+			}
+			hash := sha256.Sum256(data)
+			if err := rsa.VerifyPKCS1v15(k, crypto.SHA256, hash[:], signature); err != nil {
+				return errors.Join(ErrInvalidSignature, err)
+			}
+			return nil
+		}
+	case ed25519.PublicKey:
+		return func(algorithm string, data, signature []byte) error {
+			if algorithm != algEd25519SHA256 {
+				return fmt.Errorf("algorithm mismatch: expected %s, got %s", algEd25519SHA256, algorithm)
+			}
+			hash := sha256.Sum256(data)
+			if !ed25519.Verify(k, hash[:], signature) {
+				return errors.Join(ErrInvalidSignature, fmt.Errorf("ed25519 signature verification failed"))
+			}
+			return nil
+		}
+	default:
+		t.Fatalf("unsupported public key type: %T", pubKey)
+		return nil
+	}
+}
+
 func TestSignAndVerify(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		keyGen    func() (crypto.Signer, crypto.PublicKey, error)
 		algorithm string
+		hashOpt   crypto.SignerOpts
 		dataSize  int
 	}{
 		{
@@ -29,6 +70,7 @@ func TestSignAndVerify(t *testing.T) {
 				return key, &key.PublicKey, nil
 			},
 			algorithm: algRSASHA256,
+			hashOpt:   crypto.SHA256,
 			dataSize:  21,
 		},
 		{
@@ -38,19 +80,20 @@ func TestSignAndVerify(t *testing.T) {
 				return priv, pub, err
 			},
 			algorithm: algEd25519SHA256,
+			hashOpt:   crypto.Hash(0),
 			dataSize:  30,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			privKey, pubKey, err := tt.keyGen()
-			if err != nil {
-				t.Fatalf("key generation failed: %v", err)
-			}
+			require.NoError(t, err)
 
 			s := Signer{
 				algorithm: tt.algorithm,
+				hashOpt:   tt.hashOpt,
 				key:       privKey,
 			}
 
@@ -60,22 +103,21 @@ func TestSignAndVerify(t *testing.T) {
 			}
 
 			sig, err := s.sign(data)
-			if err != nil {
-				t.Fatalf("Sign failed: %v", err)
-			}
+			require.NoError(t, err)
 
-			if err := verify(pubKey, tt.algorithm, data, sig); err != nil {
-				t.Fatalf("Verify failed: %v", err)
-			}
+			verify := newVerifyFunc(t, pubKey)
+			require.NoError(t, verify(tt.algorithm, data, sig))
 		})
 	}
 }
 
 func TestSignatureVerificationFailures(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		keyGen        func() (crypto.Signer, crypto.PublicKey, error)
 		algorithm     string
+		hashOpt       crypto.SignerOpts
 		signData      []byte
 		verifyData    []byte
 		corruptSig    bool
@@ -91,6 +133,7 @@ func TestSignatureVerificationFailures(t *testing.T) {
 				return key, &key.PublicKey, nil
 			},
 			algorithm:     algRSASHA256,
+			hashOpt:       crypto.SHA256,
 			signData:      []byte("test data for signing"),
 			verifyData:    []byte("test data for signing"),
 			corruptSig:    true,
@@ -106,6 +149,7 @@ func TestSignatureVerificationFailures(t *testing.T) {
 				return key, &key.PublicKey, nil
 			},
 			algorithm:     algRSASHA256,
+			hashOpt:       crypto.SHA256,
 			signData:      []byte("original data"),
 			verifyData:    []byte("modified data"),
 			corruptSig:    false,
@@ -118,6 +162,7 @@ func TestSignatureVerificationFailures(t *testing.T) {
 				return priv, pub, err
 			},
 			algorithm:     algEd25519SHA256,
+			hashOpt:       crypto.Hash(0),
 			signData:      []byte("test data"),
 			verifyData:    []byte("test data"),
 			corruptSig:    true,
@@ -127,139 +172,95 @@ func TestSignatureVerificationFailures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			privKey, pubKey, err := tt.keyGen()
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 
 			s := Signer{
 				algorithm: tt.algorithm,
+				hashOpt:   tt.hashOpt,
 				key:       privKey,
 			}
 
 			sig, err := s.sign(tt.signData)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 
 			if tt.corruptSig {
 				sig[0] ^= 0xFF
 			}
 
-			err = verify(pubKey, tt.algorithm, tt.verifyData, sig)
-			if tt.expectFailure && err == nil {
-				t.Fatal("expected verification failure but got success")
-			}
-			if !tt.expectFailure && err != nil {
-				t.Fatalf("expected verification success but got: %v", err)
-			}
-			if tt.expectFailure && !errors.Is(err, ErrInvalidSignature) {
-				t.Errorf("expected ErrInvalidSignature, got: %v", err)
+			verify := newVerifyFunc(t, pubKey)
+			err = verify(tt.algorithm, tt.verifyData, sig)
+			if tt.expectFailure {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, ErrInvalidSignature)
+			} else {
+				require.NoError(t, err)
 			}
 		})
 	}
 }
 
 func TestRSAWeakKeyRejected(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // Testing weak keys
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	t.Run("boundary 1024-bit key accepted", func(t *testing.T) {
+		t.Parallel()
+		key, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // Testing weak keys
+		require.NoError(t, err)
 
-	// A 1024-bit key should be accepted (at the boundary).
-	data := []byte("test data")
-	s := Signer{
-		algorithm: algRSASHA256,
-		key:       key,
-	}
-	sig, err := s.sign(data)
-	if err != nil {
-		t.Fatalf("1024-bit key should be accepted: %v", err)
-	}
-	if err := verify(&key.PublicKey, algRSASHA256, data, sig); err != nil {
-		t.Fatalf("1024-bit key verify should succeed: %v", err)
-	}
+		data := []byte("test data")
+		s := Signer{
+			algorithm: algRSASHA256,
+			hashOpt:   crypto.SHA256,
+			key:       key,
+		}
+		sig, err := s.sign(data)
+		require.NoError(t, err)
+
+		verify := newVerifyFunc(t, &key.PublicKey)
+		require.NoError(t, verify(algRSASHA256, data, sig))
+	})
+
+	t.Run("small key rejected by algorithmForKey", func(t *testing.T) {
+		t.Parallel()
+		// Construct a minimal RSA key with a small modulus to test our check.
+		// Go 1.26+ rejects generating keys below 1024 bits, so we build one
+		// manually to exercise the algorithmForKey guard.
+		key := &rsa.PrivateKey{}
+		key.N = new(big.Int).SetInt64(1) // 1-bit modulus
+		key.E = 65537
+
+		_, _, err := algorithmForKey(key, 1024)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrRSAKeyTooSmall)
+	})
 }
 
 func TestAlgorithmValidation(t *testing.T) {
-	tests := []struct {
-		name        string
-		setupKey    func() (crypto.Signer, crypto.PublicKey)
-		signAlgo    string
-		verifyAlgo  string
-		expectError bool
-	}{
-		{
-			name: "RSA key with Ed25519 algorithm",
-			setupKey: func() (crypto.Signer, crypto.PublicKey) {
-				key, _ := rsa.GenerateKey(rand.Reader, 2048)
-				return key, &key.PublicKey
-			},
-			signAlgo:    algEd25519SHA256,
-			expectError: true,
-		},
-		{
-			name: "Ed25519 key with RSA algorithm",
-			setupKey: func() (crypto.Signer, crypto.PublicKey) {
-				pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-				return priv, pub
-			},
-			signAlgo:    algRSASHA256,
-			expectError: true,
-		},
-		{
-			name: "unsupported algorithm on sign",
-			setupKey: func() (crypto.Signer, crypto.PublicKey) {
-				key, _ := rsa.GenerateKey(rand.Reader, 2048)
-				return key, &key.PublicKey
-			},
-			signAlgo:    "rsa-sha1",
-			expectError: true,
-		},
-		{
-			name: "unsupported algorithm on verify",
-			setupKey: func() (crypto.Signer, crypto.PublicKey) {
-				key, _ := rsa.GenerateKey(rand.Reader, 2048)
-				return key, &key.PublicKey
-			},
-			signAlgo:    algRSASHA256,
-			verifyAlgo:  "rsa-sha1",
-			expectError: true,
-		},
-	}
+	t.Parallel()
+	t.Run("unsupported algorithm on verify", func(t *testing.T) {
+		t.Parallel()
+		key, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			privKey, pubKey := tt.setupKey()
-			data := []byte("data")
+		data := []byte("data")
+		s := Signer{
+			algorithm: algRSASHA256,
+			hashOpt:   crypto.SHA256,
+			key:       key,
+		}
 
-			s := Signer{
-				algorithm: tt.signAlgo,
-				key:       privKey,
-			}
+		sig, err := s.sign(data)
+		require.NoError(t, err)
 
-			sig, err := s.sign(data)
-			if tt.expectError && tt.verifyAlgo == "" {
-				if err == nil {
-					t.Fatal("expected error for key/algorithm mismatch on sign")
-				}
-				return
-			}
-			if err != nil && !tt.expectError {
-				t.Fatalf("unexpected sign error: %v", err)
-			}
-
-			if tt.verifyAlgo != "" {
-				err = verify(pubKey, tt.verifyAlgo, data, sig)
-				if err == nil {
-					t.Fatal("expected error for unsupported algorithm on verify")
-				}
-			}
-		})
-	}
+		verify := newVerifyFunc(t, &key.PublicKey)
+		err = verify("rsa-sha1", data, sig)
+		require.Error(t, err)
+	})
 }
 
 func TestComputeBodyHash(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body []byte
@@ -276,21 +277,60 @@ func TestComputeBodyHash(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			hash := computeBodyHash(tt.body)
-			if len(hash) != 32 {
-				t.Fatalf("expected 32-byte hash, got %d", len(hash))
-			}
+			require.Len(t, hash, 32)
 
 			// Test idempotency - same body should produce same hash.
 			hash2 := computeBodyHash(tt.body)
-			for i := range hash {
-				if hash[i] != hash2[i] {
-					t.Fatal("same body produced different hashes")
-				}
-			}
+			assert.Equal(t, hash, hash2)
 		})
 	}
 }
 
 // Ensure ed25519.PrivateKey implements crypto.Signer (compile-time check).
 var _ crypto.Signer = (ed25519.PrivateKey)(nil)
+
+func TestErrRSAKeyTooSmallIsWrapped(t *testing.T) {
+	t.Parallel()
+
+	// Test buildVerifier wraps the error
+	t.Run("buildVerifier", func(t *testing.T) {
+		t.Parallel()
+		v, err := NewValidator(WithMinRSAKeyBits(2048))
+		if err != nil {
+			t.Fatalf("NewValidator failed: %v", err)
+		}
+
+		// Create a small RSA key (1024 bits)
+		smallKey := &rsa.PublicKey{N: getRSATestKey(t, 1024).N}
+
+		_, err = v.buildVerifier(smallKey, "test._domainkey.example.com")
+		if err == nil {
+			t.Fatal("Expected error for small key, got nil")
+		}
+
+		// Verify errors.Is works
+		if !errors.Is(err, ErrRSAKeyTooSmall) {
+			t.Errorf("errors.Is(err, ErrRSAKeyTooSmall) = false, want true. Error: %v", err)
+		}
+	})
+
+	// Test algorithmForKey wraps the error
+	t.Run("algorithmForKey", func(t *testing.T) {
+		t.Parallel()
+
+		// Create a small RSA private key (1024 bits)
+		smallKey := getRSATestKey(t, 1024)
+
+		_, _, err := algorithmForKey(smallKey, 2048)
+		if err == nil {
+			t.Fatal("Expected error for small key, got nil")
+		}
+
+		// Verify errors.Is works
+		if !errors.Is(err, ErrRSAKeyTooSmall) {
+			t.Errorf("errors.Is(err, ErrRSAKeyTooSmall) = false, want true. Error: %v", err)
+		}
+	})
+}

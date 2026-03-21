@@ -10,11 +10,13 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/rsa"
 	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -23,54 +25,41 @@ const (
 )
 
 func TestSignNoExistingChain(t *testing.T) {
+	t.Parallel()
 	key, resolver := generateTestKey(t, "example.org", "sel")
 
 	msg := testMessage
 
-	v := NewValidator(WithResolver(resolver))
+	v, err := NewValidator(WithResolver(resolver))
+	require.NoError(t, err)
+
 	signer, err := NewSigner(key, "sel._domainkey.example.org",
+		WithValidator(v),
 		WithSignedHeaders(HeaderFrom, HeaderTo, HeaderSubject),
 		WithTimestamp(time.Unix(12345, 0)),
 		WithResolver(resolver),
 	)
-	if err != nil {
-		t.Fatalf("NewSigner: %v", err)
-	}
+	require.NoError(t, err)
 
 	result, err := signer.Sign(context.Background(), strings.NewReader(msg), "spf=pass")
-	if err != nil {
-		t.Fatalf("Sign: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify the result contains ARC headers.
 	resultStr := string(result)
-	if !strings.Contains(resultStr, "ARC-Seal:") {
-		t.Error("result missing ARC-Seal")
-	}
-	if !strings.Contains(resultStr, "ARC-Message-Signature:") {
-		t.Error("result missing ARC-Message-Signature")
-	}
-	if !strings.Contains(resultStr, "ARC-Authentication-Results:") {
-		t.Error("result missing ARC-Authentication-Results")
-	}
-	if !strings.Contains(resultStr, "cv=none") {
-		t.Error("first instance should have cv=none")
-	}
-	if !strings.Contains(resultStr, "i=1") {
-		t.Error("first instance should be i=1")
-	}
+	assert.Contains(t, resultStr, "ARC-Seal:")
+	assert.Contains(t, resultStr, "ARC-Message-Signature:")
+	assert.Contains(t, resultStr, "ARC-Authentication-Results:")
+	assert.Contains(t, resultStr, "cv=none")
+	assert.Contains(t, resultStr, "i=1")
 
 	// Validate the signed message.
 	present, err := v.ValidateBytes(context.Background(), result)
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-	if !present {
-		t.Error("expected ARC chain present")
-	}
+	require.NoError(t, err)
+	assert.True(t, present)
 }
 
 func TestSignWithExistingChain(t *testing.T) {
+	t.Parallel()
 	key1, resolver1 := generateTestKey(t, "example.org", "sel1")
 	key2, resolver2 := generateTestKey(t, "example.net", "sel2")
 
@@ -85,57 +74,45 @@ func TestSignWithExistingChain(t *testing.T) {
 
 	msg := testMessage
 
-	v := NewValidator(WithResolver(combined))
+	v, err := NewValidator(WithResolver(combined))
+	require.NoError(t, err)
 
 	// Sign first time.
 	signer1, err := NewSigner(key1, "sel1._domainkey.example.org",
+		WithValidator(v),
 		WithSignedHeaders(HeaderFrom, HeaderTo, HeaderSubject),
 		WithTimestamp(time.Unix(12345, 0)),
 		WithResolver(combined),
 	)
-	if err != nil {
-		t.Fatalf("NewSigner #1: %v", err)
-	}
+	require.NoError(t, err)
 
 	signed1, err := signer1.Sign(context.Background(), strings.NewReader(msg), "spf=pass")
-	if err != nil {
-		t.Fatalf("Sign #1: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Sign second time with different key.
 	signer2, err := NewSigner(key2, "sel2._domainkey.example.net",
+		WithValidator(v),
 		WithSignedHeaders(HeaderFrom, HeaderTo, HeaderSubject),
 		WithTimestamp(time.Unix(12346, 0)),
 		WithResolver(combined),
 	)
-	if err != nil {
-		t.Fatalf("NewSigner #2: %v", err)
-	}
+	require.NoError(t, err)
 
 	signed2, err := signer2.SignBytes(context.Background(), signed1, "spf=fail; arc=pass")
-	if err != nil {
-		t.Fatalf("Sign #2: %v", err)
-	}
+	require.NoError(t, err)
 
 	resultStr := string(signed2)
-	if !strings.Contains(resultStr, "cv=pass") {
-		t.Error("second instance should have cv=pass")
-	}
-	if !strings.Contains(resultStr, "i=2") {
-		t.Error("second instance should be i=2")
-	}
+	assert.Contains(t, resultStr, "cv=pass")
+	assert.Contains(t, resultStr, "i=2")
 
 	// Validate the doubly-signed message.
 	present, err := v.ValidateBytes(context.Background(), signed2)
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-	if !present {
-		t.Error("expected ARC chain present")
-	}
+	require.NoError(t, err)
+	assert.True(t, present)
 }
 
 func TestSignRefusesFailedChain(t *testing.T) {
+	t.Parallel()
 	key, resolver := generateTestKey(t, "example.org", "sel")
 
 	// Message with cv=fail.
@@ -144,25 +121,23 @@ func TestSignRefusesFailedChain(t *testing.T) {
 		"ARC-Authentication-Results: i=1; example.org; spf=pass\r\n" +
 		testMessageSimple
 
+	v, err := NewValidator(WithResolver(resolver))
+	require.NoError(t, err)
 	signer, err := NewSigner(key, "sel._domainkey.example.org",
+		WithValidator(v),
 		WithSignedHeaders(HeaderFrom),
 		WithResolver(resolver),
 	)
-	if err != nil {
-		t.Fatalf("NewSigner: %v", err)
-	}
+	require.NoError(t, err)
 
 	_, err = signer.Sign(context.Background(), strings.NewReader(msg), "spf=fail")
-	if err == nil {
-		t.Fatal("expected error when signing with failed chain")
-	}
+	require.Error(t, err)
 }
 
 func TestSignWithEd25519(t *testing.T) {
+	t.Parallel()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	resolver := &mapResolver{
 		records: map[string]string{
@@ -172,56 +147,153 @@ func TestSignWithEd25519(t *testing.T) {
 
 	msg := testMessage
 
-	v := NewValidator(WithResolver(resolver))
+	v, err := NewValidator(WithResolver(resolver))
+	require.NoError(t, err)
 	signer, err := NewSigner(priv, "sel._domainkey.example.org",
+		WithValidator(v),
 		WithSignedHeaders(HeaderFrom, HeaderTo, HeaderSubject),
 		WithTimestamp(time.Unix(12345, 0)),
 		WithResolver(resolver),
 	)
-	if err != nil {
-		t.Fatalf("NewSigner: %v", err)
-	}
+	require.NoError(t, err)
 
 	result, err := signer.Sign(context.Background(), strings.NewReader(msg), "spf=pass")
-	if err != nil {
-		t.Fatalf("Sign: %v", err)
-	}
+	require.NoError(t, err)
 
 	present, err := v.ValidateBytes(context.Background(), result)
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-	if !present {
-		t.Error("expected ARC chain present")
-	}
+	require.NoError(t, err)
+	assert.True(t, present)
 }
 
 func TestSignUnsupportedKeyType(t *testing.T) {
+	t.Parallel()
 	// ecdsa keys are not supported for ARC signing.
 	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
+	require.NoError(t, err)
+
+	v, err := NewValidator()
+	require.NoError(t, err)
+	_, err = NewSigner(ecKey, "sel._domainkey.example.org", WithValidator(v))
+	require.Error(t, err)
+}
+
+func TestSignerMinRSAKeyBits(t *testing.T) {
+	t.Parallel()
+	t.Run("512-bit option rejected", func(t *testing.T) {
+		t.Parallel()
+		key := getRSATestKey(t, 2048)
+		s, err := NewSigner(key, "sel._domainkey.example.org",
+			WithMinRSAKeyBits(512))
+		assert.Error(t, err, "should reject 512-bit keys")
+		assert.Nil(t, s)
+	})
+
+	// Test that the signer enforces a minimum of 2048 bits for RSA keys.
+	t.Run("1024-bit key rejected", func(t *testing.T) {
+		t.Parallel()
+		key := getRSATestKey(t, 1024)
+
+		resolver := &mapResolver{
+			records: map[string]string{
+				"sel._domainkey.example.org": encodeDKIMRecord(t, &key.PublicKey),
+			},
+		}
+
+		v, err := NewValidator(WithResolver(resolver))
+		require.NoError(t, err)
+		_, err = NewSigner(key, "sel._domainkey.example.org",
+			WithValidator(v),
+			WithResolver(resolver))
+		require.Error(t, err, "should reject 1024-bit keys")
+		assert.ErrorIs(t, err, ErrRSAKeyTooSmall)
+	})
+
+	t.Run("2048-bit key accepted", func(t *testing.T) {
+		t.Parallel()
+		key := getRSATestKey(t, 2048)
+
+		resolver := &mapResolver{
+			records: map[string]string{
+				"sel._domainkey.example.org": encodeDKIMRecord(t, &key.PublicKey),
+			},
+		}
+
+		v, err := NewValidator(WithResolver(resolver))
+		require.NoError(t, err)
+		_, err = NewSigner(key, "sel._domainkey.example.org",
+			WithValidator(v),
+			WithResolver(resolver))
+		require.NoError(t, err, "should accept 2048-bit keys")
+	})
+}
+
+func TestSignerValidatorMinBits(t *testing.T) {
+	t.Parallel()
+	// Test that the Signer uses the provided validator's minBits for validation.
+	ctx := context.Background()
+
+	// Create a 3072-bit key for the second signer.
+	signingKey := getRSATestKey(t, 3072)
+
+	// Create a 2048-bit key for the first signer.
+	existingKey := getRSATestKey(t, 2048)
+
+	resolver := &mapResolver{
+		records: map[string]string{
+			"sel1._domainkey.example.org": encodeDKIMRecord(t, &existingKey.PublicKey),
+			"sel2._domainkey.example.org": encodeDKIMRecord(t, &signingKey.PublicKey),
+		},
 	}
 
-	_, err = NewSigner(ecKey, "sel._domainkey.example.org")
-	if err == nil {
-		t.Fatal("expected error for unsupported key type")
-	}
+	// Create the first signer with a validator that accepts 2048-bit keys.
+	v1, err := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(2048))
+	require.NoError(t, err)
+	signer1, err := NewSigner(existingKey, "sel1._domainkey.example.org",
+		WithValidator(v1),
+		WithResolver(resolver),
+	)
+	require.NoError(t, err)
+
+	// Sign a message with the 2048-bit key.
+	msg1, err := signer1.Sign(ctx, strings.NewReader(testMessage), "spf=pass")
+	require.NoError(t, err)
+
+	// Create a second signer with a validator that requires 3072-bit keys.
+	// The signer's own key is 3072 bits, so construction should succeed.
+	v2, err := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(3072))
+	require.NoError(t, err)
+	signer2, err := NewSigner(signingKey, "sel2._domainkey.example.org",
+		WithValidator(v2),
+		WithResolver(resolver),
+	)
+	require.NoError(t, err)
+
+	// When signing, the validator should detect that the existing chain
+	// has a 2048-bit key (below minBits=3072) and mark it as cv=fail.
+	// The signer should still succeed but mark the chain as broken.
+	msg2, err := signer2.SignBytes(ctx, msg1, "spf=pass")
+	require.NoError(t, err)
+
+	// Verify the new seal has cv=fail (not cv=pass).
+	msg2Parsed, err := parseMessage(bytes.NewReader(msg2))
+	require.NoError(t, err)
+
+	sets, err := collectArcSets(msg2Parsed)
+	require.NoError(t, err)
+	require.Len(t, sets, 2, "should have 2 ARC sets")
+
+	// The most recent seal (instance 2) should have cv=fail.
+	require.Equal(t, chainFail, sets[1].Seal.ChainValidation)
 }
 
 func TestEndToEndSignThenValidate(t *testing.T) {
+	t.Parallel()
 	// End-to-end test: sign a message twice with different keys, then validate.
 	ctx := context.Background()
 
 	// Generate two different keys.
-	key1, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // Testing weak keys
-	if err != nil {
-		t.Fatal(err)
-	}
-	key2, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // Testing weak keys
-	if err != nil {
-		t.Fatal(err)
-	}
+	key1 := getRSATestKey(t, 2048)
+	key2 := getRSATestKey(t, 2048)
 
 	// Create a resolver with both public keys.
 	resolver := &mapResolver{
@@ -231,82 +303,56 @@ func TestEndToEndSignThenValidate(t *testing.T) {
 		},
 	}
 
-	v := NewValidator(WithResolver(resolver))
+	v, err := NewValidator(WithResolver(resolver))
+	require.NoError(t, err)
 
 	// Original message.
 	originalMsg := "From: sender@example.com\r\nTo: recipient@example.com\r\nSubject: Test\r\n\r\nThis is a test message.\r\n"
 
 	// Sign with first key (instance 1).
 	signer1, err := NewSigner(key1, "sel1._domainkey.domain1.example",
+		WithValidator(v),
 		WithSignedHeaders(HeaderFrom, HeaderTo, HeaderSubject),
 		WithTimestamp(time.Unix(1234567890, 0)),
 		WithResolver(resolver),
 	)
-	if err != nil {
-		t.Fatalf("NewSigner #1: %v", err)
-	}
+	require.NoError(t, err)
 
 	signed1, err := signer1.Sign(ctx, strings.NewReader(originalMsg), "spf=pass; dkim=pass")
-	if err != nil {
-		t.Fatalf("first sign: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Validate after first signature.
 	present1, err := v.Validate(ctx, bytes.NewReader(signed1))
-	if err != nil {
-		t.Fatalf("validate after first sign: %v", err)
-	}
-	if !present1 {
-		t.Error("expected ARC chain present after first sign")
-	}
+	require.NoError(t, err)
+	assert.True(t, present1)
 
 	// Sign again with second key (instance 2).
 	signer2, err := NewSigner(key2, "sel2._domainkey.domain2.example",
+		WithValidator(v),
 		WithSignedHeaders(HeaderFrom, HeaderTo, HeaderSubject),
 		WithTimestamp(time.Unix(1234567900, 0)),
 		WithResolver(resolver),
 	)
-	if err != nil {
-		t.Fatalf("NewSigner #2: %v", err)
-	}
+	require.NoError(t, err)
 
 	signed2, err := signer2.Sign(ctx, bytes.NewReader(signed1), "spf=pass; dkim=pass; arc=pass")
-	if err != nil {
-		t.Fatalf("second sign: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Validate the full 2-hop chain.
 	present2, err := v.Validate(ctx, bytes.NewReader(signed2))
-	if err != nil {
-		t.Fatalf("validate after second sign: %v", err)
-	}
-	if !present2 {
-		t.Error("expected ARC chain present after second sign")
-	}
+	require.NoError(t, err)
+	assert.True(t, present2)
+
 	// Verify instance numbers.
 	parsedMsg, err := parseMessage(bytes.NewReader(signed2))
-	if err != nil {
-		t.Fatalf("parsing final message: %v", err)
-	}
+	require.NoError(t, err)
 	sets, err := collectArcSets(parsedMsg)
-	if err != nil {
-		t.Fatalf("collecting sets: %v", err)
-	}
-	if len(sets) != 2 {
-		t.Fatalf("got %d sets, want 2", len(sets))
-	}
-	if sets[0].Instance != 1 {
-		t.Errorf("set[0].Instance = %d, want 1", sets[0].Instance)
-	}
-	if sets[1].Instance != 2 {
-		t.Errorf("set[1].Instance = %d, want 2", sets[1].Instance)
-	}
+	require.NoError(t, err)
+	require.Len(t, sets, 2)
+	assert.Equal(t, 1, sets[0].Instance)
+	assert.Equal(t, 2, sets[1].Instance)
 
 	// Verify cv values.
-	if sets[0].Seal.ChainValidation != chainNone {
-		t.Errorf("set[0] cv = %q, want none", sets[0].Seal.ChainValidation)
-	}
-	if sets[1].Seal.ChainValidation != chainPass {
-		t.Errorf("set[1] cv = %q, want pass", sets[1].Seal.ChainValidation)
-	}
+	assert.Equal(t, chainNone, sets[0].Seal.ChainValidation)
+	assert.Equal(t, chainPass, sets[1].Seal.ChainValidation)
 }

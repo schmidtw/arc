@@ -29,7 +29,10 @@ import (
 )
 
 func validateMessage(message io.Reader) error {
-    v := arc.NewValidator() // uses net.DefaultResolver
+    v, err := arc.NewValidator() // uses net.DefaultResolver
+    if err != nil {
+        return err
+    }
     present, err := v.Validate(context.Background(), message)
     if err != nil {
         return err // chain validation failed
@@ -68,9 +71,17 @@ func signMessage(message []byte, privateKey crypto.Signer) ([]byte, error) {
 Both `NewValidator` and `NewSigner` accept `WithResolver` to supply a custom DNS resolver. This is useful for testing or environments where `net.DefaultResolver` is not appropriate.
 
 ```go
-v := arc.NewValidator(arc.WithResolver(myResolver))
+v, err := arc.NewValidator(arc.WithResolver(myResolver))
+if err != nil {
+    return err
+}
 
-s, err := arc.NewSigner(key, domainKey, arc.WithResolver(myResolver))
+s, err := arc.NewSigner(key, domainKey,
+    arc.WithValidator(v),
+    arc.WithResolver(myResolver))
+if err != nil {
+    return err
+}
 ```
 
 Any type that implements `LookupTXT(ctx context.Context, name string) ([]string, error)` satisfies the `Resolver` interface. The standard library's `*net.Resolver` works out of the box.

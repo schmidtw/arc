@@ -8,14 +8,13 @@ linters:
     - bodyclose
     - dupl
     - errorlint
-    #- funlen
+    - funlen
     - goconst
+    - gocyclo
     - gosec
     - misspell
     - prealloc
     - unconvert
-  disable:
-    - funlen
     - errcheck
     - ineffassign
   settings:
