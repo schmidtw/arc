@@ -436,13 +436,19 @@ func (o maxCacheSize) applyValidator(v *Validator) {
 	v.maxCacheSize = o.size
 }
 
-// WithMaxCacheSize sets the maximum number of DNS public keys to cache.
+// WithMaxCacheSize sets the maximum number of parsed DNS public keys to cache.
 // This option can be passed to [NewValidator].
+//
+// The cache stores parsed key records and built verifier functions. DNS lookups
+// are always performed to fetch the current TXT record; the cache avoids the
+// expensive parsing and cryptographic operations when the DNS record content
+// hasn't changed. This provides content-based cache invalidation - if a key is
+// rotated, the cache detects the change and rebuilds the verifier.
 //
 // The cache uses LRU (Least Recently Used) eviction when the limit is reached.
 //
 // Accepted values:
-//   - 0: Disables caching entirely (always performs DNS lookups)
+//   - 0: Disables caching (always parses and builds verifiers from DNS records)
 //   - Positive integers: Cache up to that many entries with LRU eviction
 //   - -1 or any negative value: Unlimited cache size (all negative values are normalized to -1)
 //
@@ -454,9 +460,7 @@ func (o maxCacheSize) applyValidator(v *Validator) {
 //
 // Note: The cache does not respect DNS TTL values because Go's [net.Resolver]
 // does not expose TTL information from DNS responses. Cached entries are evicted
-// only by LRU policy or when the DNS record content changes. If you require
-// strict TTL-based expiration (e.g., for rapid key revocation scenarios), either
-// disable caching with WithMaxCacheSize(0) or periodically recreate the Validator.
+// only by LRU policy or when the DNS record content changes.
 func WithMaxCacheSize(size int) ValidatorOption {
 	if size < 0 {
 		size = -1 // Normalize any negative value to -1 (unlimited)
