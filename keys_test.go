@@ -18,9 +18,8 @@ var rsaTestKeyCacheMu sync.Mutex
 // getRSATestKey returns a cached RSA test key of the given size.
 // Keys are generated lazily and cached for reuse across tests.
 //
-// Note: If multiple goroutines request the same uncached size concurrently,
-// they may both generate keys, but LoadOrStore ensures only one is stored.
-// This is acceptable for test code - duplicate generation is rare and harmless.
+// Access to the cache is guarded by a mutex, so only one key per size is
+// generated and stored even under concurrent access in tests.
 func getRSATestKey(t *testing.T, size int) *rsa.PrivateKey {
 	t.Helper()
 	rsaTestKeyCacheMu.Lock()
