@@ -40,6 +40,7 @@ type valimailSignTC struct {
 }
 
 func TestValimailSignSuite(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("testdata/arc-draft-sign-tests.yml")
 	if err != nil {
 		t.Skipf("test suite not found: %v", err)
@@ -75,6 +76,7 @@ func TestValimailSignSuite(t *testing.T) {
 
 		for name, tc := range suite.Tests {
 			t.Run(name, func(t *testing.T) {
+			t.Parallel()
 				// Skip tests where expected output is empty (no signing expected).
 				expectedAS := strings.TrimSpace(tc.AS)
 				expectedAMS := strings.TrimSpace(tc.AMS)

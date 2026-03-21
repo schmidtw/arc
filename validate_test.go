@@ -19,6 +19,7 @@ import (
 )
 
 func TestValidateNoArcHeaders(t *testing.T) {
+	t.Parallel()
 	msg := "From: test@example.com\r\nTo: dest@example.com\r\nSubject: Test\r\n\r\nBody.\r\n"
 	v, err := NewValidator(WithResolver(&mapResolver{records: map[string]string{}}))
 	require.NoError(t, err)
@@ -28,6 +29,7 @@ func TestValidateNoArcHeaders(t *testing.T) {
 }
 
 func TestValidateValidChain(t *testing.T) {
+	t.Parallel()
 	key, resolver := generateTestKey(t, "example.org", "sel")
 
 	msg := buildSignedMessage(t, key, "example.org", "sel", 1)
@@ -40,6 +42,7 @@ func TestValidateValidChain(t *testing.T) {
 }
 
 func TestValidateStructuralFailures(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		msg  string
@@ -63,6 +66,7 @@ func TestValidateStructuralFailures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v, err := NewValidator(WithResolver(resolver))
 			require.NoError(t, err)
 			present, err := v.Validate(context.Background(), strings.NewReader(tt.msg))
@@ -73,6 +77,7 @@ func TestValidateStructuralFailures(t *testing.T) {
 }
 
 func TestValidateHighestCVFail(t *testing.T) {
+	t.Parallel()
 	msg := "ARC-Seal: i=1; a=rsa-sha256; cv=fail; d=example.org; s=sel; t=12345; b=dGVzdA==\r\n" +
 		"ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=example.org; h=from:to:subject; s=sel; t=12345; bh=dGVzdA==; b=dGVzdA==\r\n" +
 		"ARC-Authentication-Results: i=1; example.org; spf=pass\r\n" +
@@ -195,6 +200,7 @@ func buildSignedMessage(t *testing.T, key *rsa.PrivateKey, domain, selector stri
 }
 
 func TestValidatorMinRSAKeyBits(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		keySize    int
@@ -235,6 +241,7 @@ func TestValidatorMinRSAKeyBits(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Generate a key of the specified size.
 			key := getRSATestKey(t, tt.keySize)
 
@@ -265,6 +272,7 @@ func TestValidatorMinRSAKeyBits(t *testing.T) {
 }
 
 func TestValidatorDefaultMinBits(t *testing.T) {
+	t.Parallel()
 	// Test that the default minimum is 1024 bits.
 	key := getRSATestKey(t, 1024)
 
@@ -284,14 +292,17 @@ func TestValidatorDefaultMinBits(t *testing.T) {
 }
 
 func TestValidatorMinBits(t *testing.T) {
+	t.Parallel()
 	v, err := NewValidator(WithMinRSAKeyBits(512))
 	assert.Error(t, err)
 	assert.Nil(t, v)
 }
 func TestValidatorMaxArcSets(t *testing.T) {
+	t.Parallel()
 	resolver := &mapResolver{records: map[string]string{}}
 
 	t.Run("exceeds max (51 sets)", func(t *testing.T) {
+			t.Parallel()
 		// Build a message with 51 ARC sets - exceeds the RFC 8617 limit of 50.
 		// This should fail during parsing when i=51 is encountered.
 		var headers strings.Builder
@@ -316,6 +327,7 @@ func TestValidatorMaxArcSets(t *testing.T) {
 	})
 
 	t.Run("within max (50 sets)", func(t *testing.T) {
+			t.Parallel()
 		// Build a message with 50 ARC sets - exactly at the RFC 8617 limit.
 		// This should parse successfully (though will fail signature verification).
 		var headers strings.Builder
@@ -343,6 +355,7 @@ func TestValidatorMaxArcSets(t *testing.T) {
 }
 
 func TestRFC8617AppendixB(t *testing.T) {
+	t.Parallel()
 	// Test parsing of RFC 8617 Appendix B example message.
 	data, err := os.ReadFile("testdata/rfc8617-appendix-b.eml")
 	require.NoError(t, err)

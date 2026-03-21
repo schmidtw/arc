@@ -25,6 +25,7 @@ const (
 )
 
 func TestSignNoExistingChain(t *testing.T) {
+	t.Parallel()
 	key, resolver := generateTestKey(t, "example.org", "sel")
 
 	msg := testMessage
@@ -58,6 +59,7 @@ func TestSignNoExistingChain(t *testing.T) {
 }
 
 func TestSignWithExistingChain(t *testing.T) {
+	t.Parallel()
 	key1, resolver1 := generateTestKey(t, "example.org", "sel1")
 	key2, resolver2 := generateTestKey(t, "example.net", "sel2")
 
@@ -110,6 +112,7 @@ func TestSignWithExistingChain(t *testing.T) {
 }
 
 func TestSignRefusesFailedChain(t *testing.T) {
+	t.Parallel()
 	key, resolver := generateTestKey(t, "example.org", "sel")
 
 	// Message with cv=fail.
@@ -132,6 +135,7 @@ func TestSignRefusesFailedChain(t *testing.T) {
 }
 
 func TestSignWithEd25519(t *testing.T) {
+	t.Parallel()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 
@@ -162,6 +166,7 @@ func TestSignWithEd25519(t *testing.T) {
 }
 
 func TestSignUnsupportedKeyType(t *testing.T) {
+	t.Parallel()
 	// ecdsa keys are not supported for ARC signing.
 	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
@@ -173,7 +178,9 @@ func TestSignUnsupportedKeyType(t *testing.T) {
 }
 
 func TestSignerMinRSAKeyBits(t *testing.T) {
+	t.Parallel()
 	t.Run("512-bit option rejected", func(t *testing.T) {
+			t.Parallel()
 		key := getRSATestKey(t, 2048)
 		s, err := NewSigner(key, "sel._domainkey.example.org",
 			WithMinRSAKeyBits(512))
@@ -183,6 +190,7 @@ func TestSignerMinRSAKeyBits(t *testing.T) {
 
 	// Test that the signer enforces a minimum of 2048 bits for RSA keys.
 	t.Run("1024-bit key rejected", func(t *testing.T) {
+			t.Parallel()
 		key := getRSATestKey(t, 1024)
 
 		resolver := &mapResolver{
@@ -201,6 +209,7 @@ func TestSignerMinRSAKeyBits(t *testing.T) {
 	})
 
 	t.Run("2048-bit key accepted", func(t *testing.T) {
+			t.Parallel()
 		key := getRSATestKey(t, 2048)
 
 		resolver := &mapResolver{
@@ -219,6 +228,7 @@ func TestSignerMinRSAKeyBits(t *testing.T) {
 }
 
 func TestSignerValidatorMinBits(t *testing.T) {
+	t.Parallel()
 	// Test that the Signer uses the provided validator's minBits for validation.
 	ctx := context.Background()
 
@@ -277,6 +287,7 @@ func TestSignerValidatorMinBits(t *testing.T) {
 }
 
 func TestEndToEndSignThenValidate(t *testing.T) {
+	t.Parallel()
 	// End-to-end test: sign a message twice with different keys, then validate.
 	ctx := context.Background()
 

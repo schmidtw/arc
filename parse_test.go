@@ -13,6 +13,7 @@ import (
 )
 
 func TestParseAAR(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		input      string
@@ -62,6 +63,7 @@ func TestParseAAR(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			aar, err := parseAAR(tt.input)
 			if tt.wantErr {
 				require.Error(t, err)
@@ -75,6 +77,7 @@ func TestParseAAR(t *testing.T) {
 }
 
 func TestParseAMS(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -141,6 +144,7 @@ func TestParseAMS(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ams, err := parseAMS(tt.input)
 			if tt.wantErr {
 				require.Error(t, err)
@@ -158,6 +162,7 @@ func TestParseAMS(t *testing.T) {
 }
 
 func TestParseArcSeal(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -202,6 +207,7 @@ func TestParseArcSeal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			as, err := parseArcSeal(tt.input)
 			if tt.wantErr {
 				require.Error(t, err)
@@ -215,6 +221,7 @@ func TestParseArcSeal(t *testing.T) {
 }
 
 func TestParseAMSTimestamp(t *testing.T) {
+	t.Parallel()
 	input := "i=1; a=rsa-sha256; c=relaxed/relaxed; d=example.org; " +
 		"h=from:to:subject; s=sel; t=1421348401; " +
 		"bh=KWSe46TZKCcDbH4klJPo+tjk5LWJnVRlP5pvjXFZYLQ=; b=dGVzdA=="
@@ -227,6 +234,7 @@ func TestParseAMSTimestamp(t *testing.T) {
 }
 
 func TestCollectArcSets(t *testing.T) {
+	t.Parallel()
 	msg := `ARC-Seal: i=2; a=rsa-sha256; cv=pass; d=example2.com; s=sel2; t=12345; b=dGVzdA==
 ARC-Message-Signature: i=2; a=rsa-sha256; c=relaxed/relaxed; d=example2.com; h=from:to:subject; s=sel2; t=12345; bh=KWSe46TZKCcDbH4klJPo+tjk5LWJnVRlP5pvjXFZYLQ=; b=dGVzdA==
 ARC-Authentication-Results: i=2; example2.com; spf=fail
@@ -261,6 +269,7 @@ Body here.
 }
 
 func TestCollectArcSetsEmpty(t *testing.T) {
+	t.Parallel()
 	msg := `From: test@example.com
 To: dest@example.com
 Subject: Test
@@ -277,6 +286,7 @@ Body here.
 }
 
 func TestParseMessageHeadersAndBody(t *testing.T) {
+	t.Parallel()
 	msg := "From: test@example.com\r\nTo: dest@example.com\r\nSubject: Hello\r\n\r\nBody content here.\r\n"
 
 	parsed, err := parseMessage(strings.NewReader(msg))
@@ -291,6 +301,7 @@ func TestParseMessageHeadersAndBody(t *testing.T) {
 }
 
 func TestParseMessageWithLongBodyLine(t *testing.T) {
+	t.Parallel()
 	// Test that messages with very long body lines don't cause scanner failures.
 	// bufio.Scanner has a default token limit of 64KB, which could cause failures
 	// if we continued scanning the body after finding headers.
@@ -309,6 +320,7 @@ func TestParseMessageWithLongBodyLine(t *testing.T) {
 }
 
 func TestSerializeAARRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := Signer{
 		authServID: "lists.example.org",
 	}

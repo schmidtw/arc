@@ -52,6 +52,7 @@ func newVerifyFunc(t *testing.T, pubKey crypto.PublicKey) verifyFunc {
 }
 
 func TestSignAndVerify(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		keyGen    func() (crypto.Signer, crypto.PublicKey, error)
@@ -86,6 +87,7 @@ func TestSignAndVerify(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			privKey, pubKey, err := tt.keyGen()
 			require.NoError(t, err)
 
@@ -110,6 +112,7 @@ func TestSignAndVerify(t *testing.T) {
 }
 
 func TestSignatureVerificationFailures(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		keyGen        func() (crypto.Signer, crypto.PublicKey, error)
@@ -169,6 +172,7 @@ func TestSignatureVerificationFailures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			privKey, pubKey, err := tt.keyGen()
 			require.NoError(t, err)
 
@@ -198,7 +202,9 @@ func TestSignatureVerificationFailures(t *testing.T) {
 }
 
 func TestRSAWeakKeyRejected(t *testing.T) {
+	t.Parallel()
 	t.Run("boundary 1024-bit key accepted", func(t *testing.T) {
+			t.Parallel()
 		key, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // Testing weak keys
 		require.NoError(t, err)
 
@@ -216,6 +222,7 @@ func TestRSAWeakKeyRejected(t *testing.T) {
 	})
 
 	t.Run("small key rejected by algorithmForKey", func(t *testing.T) {
+			t.Parallel()
 		// Construct a minimal RSA key with a small modulus to test our check.
 		// Go 1.26+ rejects generating keys below 1024 bits, so we build one
 		// manually to exercise the algorithmForKey guard.
@@ -230,7 +237,9 @@ func TestRSAWeakKeyRejected(t *testing.T) {
 }
 
 func TestAlgorithmValidation(t *testing.T) {
+	t.Parallel()
 	t.Run("unsupported algorithm on verify", func(t *testing.T) {
+			t.Parallel()
 		key, err := rsa.GenerateKey(rand.Reader, 2048)
 		require.NoError(t, err)
 
@@ -251,6 +260,7 @@ func TestAlgorithmValidation(t *testing.T) {
 }
 
 func TestComputeBodyHash(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body []byte
@@ -267,6 +277,7 @@ func TestComputeBodyHash(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			hash := computeBodyHash(tt.body)
 			require.Len(t, hash, 32)
 

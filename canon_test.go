@@ -10,6 +10,7 @@ import (
 )
 
 func TestCanonicalizeHeaderRelaxed(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		hName string
@@ -62,12 +63,14 @@ func TestCanonicalizeHeaderRelaxed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			assert.Equal(t, tt.want, canonicalizeHeaderRelaxed(tt.hName, tt.hVal))
 		})
 	}
 }
 
 func TestCanonicalizeHeaderRelaxedRaw(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  string
@@ -87,12 +90,14 @@ func TestCanonicalizeHeaderRelaxedRaw(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			assert.Equal(t, tt.want, canonicalizeHeaderRelaxedRaw(tt.raw))
 		})
 	}
 }
 
 func TestCanonicalizeBodyRelaxed(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body string
@@ -157,6 +162,7 @@ func TestCanonicalizeBodyRelaxed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			assert.Equal(t, tt.want, string(canonicalizeBodyRelaxed([]byte(tt.body))))
 		})
 	}

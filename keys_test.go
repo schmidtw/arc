@@ -6,19 +6,22 @@ package arc
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-var rsaTestKeyCache = make(map[int]*rsa.PrivateKey)
+var rsaTestKeyCache = sync.Map{}
 
 func getRSATestKey(t *testing.T, size int) *rsa.PrivateKey {
-	if key, ok := rsaTestKeyCache[size]; ok {
-		return key
+	t.Helper()
+
+	if key, ok := rsaTestKeyCache.Load(size); ok {
+		return key.(*rsa.PrivateKey)
 	}
 	key, err := rsa.GenerateKey(rand.Reader, size)
 	require.NoError(t, err)
-	rsaTestKeyCache[size] = key
+	rsaTestKeyCache.Store(size, key)
 	return key
 }

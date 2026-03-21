@@ -28,6 +28,7 @@ type valimailValidateTest struct {
 }
 
 func TestValimailValidationSuite(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("testdata/arc-draft-validation-tests.yml")
 	if err != nil {
 		t.Skipf("test suite not found: %v", err)
@@ -43,6 +44,7 @@ func TestValimailValidationSuite(t *testing.T) {
 
 	for name, tc := range suite.Tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			msg := tc.Message
 
 			present, err := v.Validate(context.Background(), strings.NewReader(msg))

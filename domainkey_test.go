@@ -11,6 +11,7 @@ import (
 )
 
 func TestSplitDomainkey(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		fqdn     string
@@ -70,6 +71,7 @@ func TestSplitDomainkey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			selector, domain, err := splitDomainkey(tt.fqdn)
 			if tt.errMsg != "" {
 				require.Error(t, err)

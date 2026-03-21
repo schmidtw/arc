@@ -11,6 +11,7 @@ import (
 )
 
 func TestParseTagList(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -118,6 +119,7 @@ func TestParseTagList(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			tl, err := parseTagList(tt.input)
 			if tt.wantErr {
 				require.Error(t, err)
@@ -131,6 +133,7 @@ func TestParseTagList(t *testing.T) {
 }
 
 func TestIsValidTagName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -158,12 +161,14 @@ func TestIsValidTagName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			assert.Equal(t, tt.want, isValidTagName(tt.input))
 		})
 	}
 }
 
 func TestTagListGet(t *testing.T) {
+	t.Parallel()
 	tl, err := parseTagList("a=rsa-sha256; d=example.com; s=sel1")
 	require.NoError(t, err)
 
@@ -180,6 +185,7 @@ func TestTagListGet(t *testing.T) {
 }
 
 func TestTagListRequire(t *testing.T) {
+	t.Parallel()
 	tl, err := parseTagList("a=rsa-sha256")
 	require.NoError(t, err)
 

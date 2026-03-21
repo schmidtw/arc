@@ -67,6 +67,7 @@ func generateTestKeyRecord(t *testing.T) (string, ed25519.PrivateKey) {
 }
 
 func TestCacheDisabled(t *testing.T) {
+	t.Parallel()
 	resolver := newTestCacheResolver()
 	record, _ := generateTestKeyRecord(t)
 	resolver.setRecord(testDomainKey, record)
@@ -92,6 +93,7 @@ func TestCacheDisabled(t *testing.T) {
 }
 
 func TestBoundedCacheLRU(t *testing.T) {
+	t.Parallel()
 	resolver := newTestCacheResolver()
 
 	// Create validator with cache size of 3
@@ -138,6 +140,7 @@ func TestBoundedCacheLRU(t *testing.T) {
 }
 
 func TestUnboundedCache(t *testing.T) {
+	t.Parallel()
 	resolver := newTestCacheResolver()
 
 	// Create validator with unbounded cache
@@ -165,6 +168,7 @@ func TestUnboundedCache(t *testing.T) {
 }
 
 func TestCacheHitWithLRUUpdate(t *testing.T) {
+	t.Parallel()
 	resolver := newTestCacheResolver()
 
 	// Create validator with cache size of 3
@@ -219,6 +223,7 @@ func TestCacheHitWithLRUUpdate(t *testing.T) {
 }
 
 func TestCacheInvalidationOnRecordChange(t *testing.T) {
+	t.Parallel()
 	resolver := newTestCacheResolver()
 	record1, _ := generateTestKeyRecord(t)
 	resolver.setRecord(testDomainKey, record1)
@@ -267,6 +272,7 @@ func TestCacheInvalidationOnRecordChange(t *testing.T) {
 }
 
 func TestCacheConcurrentAccess(t *testing.T) {
+	t.Parallel()
 	resolver := newTestCacheResolver()
 	record, _ := generateTestKeyRecord(t)
 	resolver.setRecord(testDomainKey, record)
@@ -300,9 +306,11 @@ func TestCacheConcurrentAccess(t *testing.T) {
 }
 
 func TestCacheSizeZeroVsNegativeOne(t *testing.T) {
+	t.Parallel()
 	resolver := newTestCacheResolver()
 
 	t.Run("maxCacheSize=0 disables caching", func(t *testing.T) {
+			t.Parallel()
 		v, err := NewValidator(WithResolver(resolver), WithMaxCacheSize(0))
 		require.NoError(t, err)
 		assert.Equal(t, 0, v.maxCacheSize)
@@ -320,6 +328,7 @@ func TestCacheSizeZeroVsNegativeOne(t *testing.T) {
 	})
 
 	t.Run("maxCacheSize=-1 enables unbounded caching", func(t *testing.T) {
+			t.Parallel()
 		v, err := NewValidator(WithResolver(resolver), WithMaxCacheSize(-1))
 		require.NoError(t, err)
 		assert.Equal(t, -1, v.maxCacheSize)
