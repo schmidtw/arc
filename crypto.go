@@ -23,7 +23,7 @@ func algorithmForKey(key crypto.Signer, minBits int) (string, crypto.SignerOpts,
 	switch k := key.(type) {
 	case *rsa.PrivateKey:
 		if k.N.BitLen() < minBits {
-			return "", nil, fmt.Errorf("RSA key too small: %d bits (minimum %d)", k.N.BitLen(), minBits)
+			return "", nil, fmt.Errorf("%w: %d bits (minimum %d)", ErrRSAKeyTooSmall, k.N.BitLen(), minBits)
 		}
 		return algRSASHA256, crypto.SHA256, nil
 	case ed25519.PrivateKey, *ed25519.PrivateKey:

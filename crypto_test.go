@@ -222,7 +222,7 @@ func TestRSAWeakKeyRejected(t *testing.T) {
 	})
 
 	t.Run("small key rejected by algorithmForKey", func(t *testing.T) {
-			t.Parallel()
+		t.Parallel()
 		// Construct a minimal RSA key with a small modulus to test our check.
 		// Go 1.26+ rejects generating keys below 1024 bits, so we build one
 		// manually to exercise the algorithmForKey guard.
@@ -232,7 +232,7 @@ func TestRSAWeakKeyRejected(t *testing.T) {
 
 		_, _, err := algorithmForKey(key, 1024)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "RSA key too small")
+		assert.ErrorIs(t, err, ErrRSAKeyTooSmall)
 	})
 }
 
@@ -290,3 +290,47 @@ func TestComputeBodyHash(t *testing.T) {
 
 // Ensure ed25519.PrivateKey implements crypto.Signer (compile-time check).
 var _ crypto.Signer = (ed25519.PrivateKey)(nil)
+
+func TestErrRSAKeyTooSmallIsWrapped(t *testing.T) {
+	t.Parallel()
+
+	// Test buildVerifier wraps the error
+	t.Run("buildVerifier", func(t *testing.T) {
+		t.Parallel()
+		v, err := NewValidator(WithMinRSAKeyBits(2048))
+		if err != nil {
+			t.Fatalf("NewValidator failed: %v", err)
+		}
+
+		// Create a small RSA key (1024 bits)
+		smallKey := &rsa.PublicKey{N: getRSATestKey(t, 1024).N}
+
+		_, err = v.buildVerifier(smallKey, "test._domainkey.example.com")
+		if err == nil {
+			t.Fatal("Expected error for small key, got nil")
+		}
+
+		// Verify errors.Is works
+		if !errors.Is(err, ErrRSAKeyTooSmall) {
+			t.Errorf("errors.Is(err, ErrRSAKeyTooSmall) = false, want true. Error: %v", err)
+		}
+	})
+
+	// Test algorithmForKey wraps the error
+	t.Run("algorithmForKey", func(t *testing.T) {
+		t.Parallel()
+
+		// Create a small RSA private key (1024 bits)
+		smallKey := getRSATestKey(t, 1024)
+
+		_, _, err := algorithmForKey(smallKey, 2048)
+		if err == nil {
+			t.Fatal("Expected error for small key, got nil")
+		}
+
+		// Verify errors.Is works
+		if !errors.Is(err, ErrRSAKeyTooSmall) {
+			t.Errorf("errors.Is(err, ErrRSAKeyTooSmall) = false, want true. Error: %v", err)
+		}
+	})
+}

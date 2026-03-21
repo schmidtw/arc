@@ -265,7 +265,7 @@ func TestValidatorMinRSAKeyBits(t *testing.T) {
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "RSA key too small")
+				assert.ErrorIs(t, err, ErrRSAKeyTooSmall)
 			}
 		})
 	}

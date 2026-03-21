@@ -205,7 +205,7 @@ func TestSignerMinRSAKeyBits(t *testing.T) {
 			WithValidator(v),
 			WithResolver(resolver))
 		require.Error(t, err, "should reject 1024-bit keys")
-		assert.Contains(t, err.Error(), "RSA key too small")
+		assert.ErrorIs(t, err, ErrRSAKeyTooSmall)
 	})
 
 	t.Run("2048-bit key accepted", func(t *testing.T) {

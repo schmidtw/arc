@@ -122,7 +122,7 @@ func (v *Validator) buildVerifier(key crypto.PublicKey, domainKey string) (verif
 	switch k := key.(type) {
 	case *rsa.PublicKey:
 		if k.N.BitLen() < v.minBits {
-			return nil, fmt.Errorf("RSA key too small: %d bits (minimum %d)", k.N.BitLen(), v.minBits)
+			return nil, fmt.Errorf("%w: %d bits (minimum %d)", ErrRSAKeyTooSmall, k.N.BitLen(), v.minBits)
 		}
 		return func(algorithm string, data, signature []byte) error {
 			if algorithm != algRSASHA256 {
