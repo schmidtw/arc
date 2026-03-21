@@ -19,7 +19,10 @@
 //	)
 //
 //	func validateMessage(message io.Reader) error {
-//		v := arc.NewValidator() // uses net.DefaultResolver
+//		v, err := arc.NewValidator() // uses net.DefaultResolver
+//		if err != nil {
+//			return err
+//		}
 //		present, err := v.Validate(context.Background(), message)
 //		if err != nil {
 //			return err // chain validation failed
@@ -57,9 +60,15 @@
 //
 // To customize validation behavior, provide a validator via [WithValidator]:
 //
-//	validator := arc.NewValidator(arc.WithMinRSAKeyBits(2048))
+//	validator, err := arc.NewValidator(arc.WithMinRSAKeyBits(2048))
+//	if err != nil {
+//		return nil, err
+//	}
 //	signer, err := arc.NewSigner(privateKey, "sel._domainkey.example.org",
 //		arc.WithValidator(validator))
+//	if err != nil {
+//		return nil, err
+//	}
 package arc
 
 import (
@@ -350,11 +359,17 @@ func WithAuthServID(id string) SignerOption {
 //
 // You can create a custom validator to control validation behavior:
 //
-//	v := arc.NewValidator(
+//	v, err := arc.NewValidator(
 //	    arc.WithMinRSAKeyBits(2048),
 //	    arc.WithResolver(customResolver),
 //	)
+//	if err != nil {
+//	    return err
+//	}
 //	signer, err := arc.NewSigner(key, domainKey, arc.WithValidator(v))
+//	if err != nil {
+//	    return err
+//	}
 func WithValidator(v *Validator) SignerOption {
 	return signerOptionFunc(func(s *Signer) {
 		s.validator = v
