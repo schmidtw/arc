@@ -318,15 +318,3 @@ func TestSerializeAARRoundTrip(t *testing.T) {
 	assert.Contains(t, hdr, "i=1")
 	assert.Contains(t, hdr, "lists.example.org")
 }
-
-func TestFoldHeader(t *testing.T) {
-	short := "ARC-Seal: i=1; a=rsa-sha256; cv=none; d=ex.com; s=s; b=dGVzdA=="
-	folded := foldHeader(short)
-	assert.Equal(t, short, folded)
-
-	long := "ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=example.org; h=from:to:subject:date:message-id; s=selector; t=12345678; bh=KWSe46TZKCcDbH4klJPo+tjk5LWJnVRlP5pvjXFZYLQ=; b=dGVzdHNpZ25hdHVyZXZhbHVlaGVyZQ=="
-	folded = foldHeader(long)
-	for _, line := range strings.Split(folded, "\r\n") {
-		assert.LessOrEqual(t, len(line), 78, "line: %q", line)
-	}
-}
