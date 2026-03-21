@@ -33,14 +33,11 @@ func canonicalizeHeaderRelaxed(name, value string) string {
 // canonicalizeHeaderRelaxedRaw applies relaxed header canonicalization to a
 // raw header line (including the "Name: Value" format).
 func canonicalizeHeaderRelaxedRaw(raw string) string {
-	colonIdx := strings.IndexByte(raw, ':')
-	if colonIdx < 0 {
+	name, value, ok := strings.Cut(raw, ":")
+	if !ok {
 		// Shouldn't happen with valid headers.
 		return strings.ToLower(strings.TrimSpace(raw))
 	}
-
-	name := raw[:colonIdx]
-	value := raw[colonIdx+1:]
 
 	return canonicalizeHeaderRelaxed(name, value)
 }

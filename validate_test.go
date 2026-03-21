@@ -5,44 +5,44 @@ package arc
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateNoArcHeaders(t *testing.T) {
+	t.Parallel()
 	msg := "From: test@example.com\r\nTo: dest@example.com\r\nSubject: Test\r\n\r\nBody.\r\n"
-	v := NewValidator(WithResolver(&mapResolver{records: map[string]string{}}))
+	v, err := NewValidator(WithResolver(&mapResolver{records: map[string]string{}}))
+	require.NoError(t, err)
 	present, err := v.Validate(context.Background(), strings.NewReader(msg))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if present {
-		t.Error("expected no ARC chain present")
-	}
+	require.NoError(t, err)
+	assert.False(t, present)
 }
 
 func TestValidateValidChain(t *testing.T) {
+	t.Parallel()
 	key, resolver := generateTestKey(t, "example.org", "sel")
 
 	msg := buildSignedMessage(t, key, "example.org", "sel", 1)
 
-	v := NewValidator(WithResolver(resolver))
+	v, err := NewValidator(WithResolver(resolver))
+	require.NoError(t, err)
 	present, err := v.Validate(context.Background(), strings.NewReader(msg))
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-	if !present {
-		t.Error("expected ARC chain present")
-	}
+	require.NoError(t, err)
+	assert.True(t, present)
 }
 
 func TestValidateStructuralFailures(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		msg  string
@@ -66,42 +66,35 @@ func TestValidateStructuralFailures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			v := NewValidator(WithResolver(resolver))
+			t.Parallel()
+			v, err := NewValidator(WithResolver(resolver))
+			require.NoError(t, err)
 			present, err := v.Validate(context.Background(), strings.NewReader(tt.msg))
-			if !present {
-				t.Error("expected ARC chain present")
-			}
-			if err == nil {
-				t.Error("expected validation error")
-			}
+			assert.True(t, present)
+			assert.Error(t, err)
 		})
 	}
 }
 
 func TestValidateHighestCVFail(t *testing.T) {
+	t.Parallel()
 	msg := "ARC-Seal: i=1; a=rsa-sha256; cv=fail; d=example.org; s=sel; t=12345; b=dGVzdA==\r\n" +
 		"ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=example.org; h=from:to:subject; s=sel; t=12345; bh=dGVzdA==; b=dGVzdA==\r\n" +
 		"ARC-Authentication-Results: i=1; example.org; spf=pass\r\n" +
 		"From: test@example.com\r\n\r\nBody.\r\n"
 
-	v := NewValidator(WithResolver(&mapResolver{records: map[string]string{}}))
+	v, err := NewValidator(WithResolver(&mapResolver{records: map[string]string{}}))
+	require.NoError(t, err)
 	present, err := v.Validate(context.Background(), strings.NewReader(msg))
-	if !present {
-		t.Error("expected ARC chain present")
-	}
-	if err == nil {
-		t.Error("expected validation error")
-	}
+	assert.True(t, present)
+	assert.Error(t, err)
 }
 
 // Helper functions for building test messages with valid signatures.
 
 func generateTestKey(t *testing.T, domain, selector string) (*rsa.PrivateKey, *mapResolver) {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := getRSATestKey(t, 2048)
 
 	resolver := &mapResolver{
 		records: map[string]string{
@@ -116,9 +109,7 @@ func generateTestKey(t *testing.T, domain, selector string) (*rsa.PrivateKey, *m
 func encodeDKIMRecord(t *testing.T, pub *rsa.PublicKey) string {
 	t.Helper()
 	der, err := x509.MarshalPKIXPublicKey(pub)
-	if err != nil {
-		t.Fatalf("marshaling public key: %v", err)
-	}
+	require.NoError(t, err)
 	return "v=DKIM1; k=rsa; p=" + base64.StdEncoding.EncodeToString(der)
 }
 
@@ -146,9 +137,7 @@ func buildSignedMessage(t *testing.T, key *rsa.PrivateKey, domain, selector stri
 	// Parse the message to get headers for signing.
 	fullMsg := aarStr + "\r\n" + baseHeaders + "\r\n" + bodyContent
 	msg, err := parseMessageBytes([]byte(fullMsg))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	var amsBuf strings.Builder
 	for _, h := range signHeaders {
@@ -166,9 +155,7 @@ func buildSignedMessage(t *testing.T, key *rsa.PrivateKey, domain, selector stri
 	amsBuf.WriteString(amsCanon)
 
 	amsSig, err := sign(key, algRSASHA256, []byte(amsBuf.String()))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	amsStr := serializeAMS(instance, algRSASHA256, domain, selector,
 		signHeaders, bodyHash, amsSig, ts)
@@ -196,9 +183,7 @@ func buildSignedMessage(t *testing.T, key *rsa.PrivateKey, domain, selector stri
 	asBuf.WriteString(asCanon)
 
 	asSig, err := sign(key, algRSASHA256, []byte(asBuf.String()))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	asStr := serializeArcSeal(instance, algRSASHA256, domain, selector, cv, asSig, ts)
 
@@ -214,104 +199,211 @@ func buildSignedMessage(t *testing.T, key *rsa.PrivateKey, domain, selector stri
 	return result.String()
 }
 
+func TestValidatorMinRSAKeyBits(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		keySize    int
+		minBits    int
+		shouldPass bool
+	}{
+		{
+			name:       "1024-bit key with min=1024 should pass",
+			keySize:    1024,
+			minBits:    1024,
+			shouldPass: true,
+		},
+		{
+			name:       "2048-bit key with min=1024 should pass",
+			keySize:    2048,
+			minBits:    1024,
+			shouldPass: true,
+		},
+		{
+			name:       "1024-bit key with min=2048 should fail",
+			keySize:    1024,
+			minBits:    2048,
+			shouldPass: false,
+		},
+		{
+			name:       "2048-bit key with min=2048 should pass",
+			keySize:    2048,
+			minBits:    2048,
+			shouldPass: true,
+		},
+		{
+			name:       "4096-bit key with min=2048 should pass",
+			keySize:    4096,
+			minBits:    2048,
+			shouldPass: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Generate a key of the specified size.
+			key := getRSATestKey(t, tt.keySize)
+
+			// Create resolver with the public key.
+			resolver := &mapResolver{
+				records: map[string]string{
+					"sel._domainkey.example.org": encodeDKIMRecord(t, &key.PublicKey),
+				},
+			}
+
+			// Create a signed message with this key.
+			msg := buildSignedMessage(t, key, "example.org", "sel", 1)
+
+			// Validate with the specified minBits.
+			v, err := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(tt.minBits))
+			require.NoError(t, err)
+			present, err := v.Validate(context.Background(), strings.NewReader(msg))
+			assert.True(t, present)
+
+			if tt.shouldPass {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, ErrRSAKeyTooSmall)
+			}
+		})
+	}
+}
+
+func TestValidatorDefaultMinBits(t *testing.T) {
+	t.Parallel()
+	// Test that the default minimum is 1024 bits.
+	key := getRSATestKey(t, 1024)
+
+	resolver := &mapResolver{
+		records: map[string]string{
+			"sel._domainkey.example.org": encodeDKIMRecord(t, &key.PublicKey),
+		},
+	}
+
+	msg := buildSignedMessage(t, key, "example.org", "sel", 1)
+
+	v, err := NewValidator(WithResolver(resolver)) // No explicit minBits
+	require.NoError(t, err)
+	present, err := v.Validate(context.Background(), strings.NewReader(msg))
+	assert.True(t, present)
+	require.NoError(t, err, "default should accept 1024-bit keys")
+}
+
+func TestValidatorMinBits(t *testing.T) {
+	t.Parallel()
+	v, err := NewValidator(WithMinRSAKeyBits(512))
+	assert.Error(t, err)
+	assert.Nil(t, v)
+}
+func TestValidatorMaxArcSets(t *testing.T) {
+	t.Parallel()
+	resolver := &mapResolver{records: map[string]string{}}
+
+	t.Run("exceeds max (51 sets)", func(t *testing.T) {
+		t.Parallel()
+		// Build a message with 51 ARC sets - exceeds the RFC 8617 limit of 50.
+		// This should fail during parsing when i=51 is encountered.
+		var headers strings.Builder
+		for i := 1; i <= 51; i++ {
+			cv := "none"
+			if i > 1 {
+				cv = "pass"
+			}
+			fmt.Fprintf(&headers, "ARC-Seal: i=%d; a=rsa-sha256; cv=%s; d=example.org; s=sel; t=12345; b=dGVzdA==\r\n", i, cv)
+			fmt.Fprintf(&headers, "ARC-Message-Signature: i=%d; a=rsa-sha256; c=relaxed/relaxed; d=example.org; h=from; s=sel; t=12345; bh=dGVzdA==; b=dGVzdA==\r\n", i)
+			fmt.Fprintf(&headers, "ARC-Authentication-Results: i=%d; example.org; spf=pass\r\n", i)
+		}
+		msg := headers.String() + "From: test@example.com\r\n\r\nBody.\r\n"
+
+		v, err := NewValidator(WithResolver(resolver))
+		require.NoError(t, err)
+		present, err := v.Validate(context.Background(), strings.NewReader(msg))
+		assert.True(t, present)
+		require.Error(t, err)
+		// Fails during parsing with "instance value 51 out of range [1, 50]"
+		assert.Contains(t, err.Error(), "out of range [1, 50]")
+	})
+
+	t.Run("within max (50 sets)", func(t *testing.T) {
+		t.Parallel()
+		// Build a message with 50 ARC sets - exactly at the RFC 8617 limit.
+		// This should parse successfully (though will fail signature verification).
+		var headers strings.Builder
+		for i := 1; i <= 50; i++ {
+			cv := "none"
+			if i > 1 {
+				cv = "pass"
+			}
+			fmt.Fprintf(&headers, "ARC-Seal: i=%d; a=rsa-sha256; cv=%s; d=example.org; s=sel; t=12345; b=dGVzdA==\r\n", i, cv)
+			fmt.Fprintf(&headers, "ARC-Message-Signature: i=%d; a=rsa-sha256; c=relaxed/relaxed; d=example.org; h=from; s=sel; t=12345; bh=dGVzdA==; b=dGVzdA==\r\n", i)
+			fmt.Fprintf(&headers, "ARC-Authentication-Results: i=%d; example.org; spf=pass\r\n", i)
+		}
+		msg := headers.String() + "From: test@example.com\r\n\r\nBody.\r\n"
+
+		v, err := NewValidator(WithResolver(resolver))
+		require.NoError(t, err)
+		present, err := v.Validate(context.Background(), strings.NewReader(msg))
+		assert.True(t, present)
+		// Will fail later (signature verification), but not on instance parsing/counting.
+		if err != nil {
+			assert.NotContains(t, err.Error(), "out of range")
+			assert.NotContains(t, err.Error(), "exceeds maximum")
+		}
+	})
+}
+
 func TestRFC8617AppendixB(t *testing.T) {
+	t.Parallel()
 	// Test parsing of RFC 8617 Appendix B example message.
 	data, err := os.ReadFile("testdata/rfc8617-appendix-b.eml")
-	if err != nil {
-		t.Fatalf("reading test file: %v", err)
-	}
+	require.NoError(t, err)
 
 	msg, err := parseMessage(strings.NewReader(string(data)))
-	if err != nil {
-		t.Fatalf("parsing message: %v", err)
-	}
+	require.NoError(t, err)
 
 	sets, err := collectArcSets(msg)
-	if err != nil {
-		t.Fatalf("collecting ARC sets: %v", err)
-	}
+	require.NoError(t, err)
 
-	if len(sets) != 3 {
-		t.Fatalf("got %d ARC sets, want 3", len(sets))
-	}
+	require.Len(t, sets, 3)
 
 	// Verify instance numbers.
 	for i, s := range sets {
-		wantInstance := i + 1
-		if s.Instance != wantInstance {
-			t.Errorf("set[%d].Instance = %d, want %d", i, s.Instance, wantInstance)
-		}
+		assert.Equal(t, i+1, s.Instance)
 	}
 
 	// Verify ARC Set 1 (lists.example.org).
-	if sets[0].Seal.Domain != "lists.example.org" {
-		t.Errorf("set[0].Seal.Domain = %q, want %q", sets[0].Seal.Domain, "lists.example.org")
-	}
-	if sets[0].Seal.Selector != "dk-lists" {
-		t.Errorf("set[0].Seal.Selector = %q, want %q", sets[0].Seal.Selector, "dk-lists")
-	}
-	if sets[0].Seal.ChainValidation != chainNone {
-		t.Errorf("set[0].Seal.CV = %q, want %q", sets[0].Seal.ChainValidation, string(chainNone))
-	}
-	if sets[0].AMS.Domain != "lists.example.org" {
-		t.Errorf("set[0].AMS.Domain = %q, want %q", sets[0].AMS.Domain, "lists.example.org")
-	}
-	if sets[0].AAR.AuthServID != "lists.example.org" {
-		t.Errorf("set[0].AAR.AuthServID = %q, want %q", sets[0].AAR.AuthServID, "lists.example.org")
-	}
+	assert.Equal(t, "lists.example.org", sets[0].Seal.Domain)
+	assert.Equal(t, "dk-lists", sets[0].Seal.Selector)
+	assert.Equal(t, chainNone, sets[0].Seal.ChainValidation)
+	assert.Equal(t, "lists.example.org", sets[0].AMS.Domain)
+	assert.Equal(t, "lists.example.org", sets[0].AAR.AuthServID)
 
 	// Verify ARC Set 2 (gmail.example).
-	if sets[1].Seal.Domain != "gmail.example" {
-		t.Errorf("set[1].Seal.Domain = %q, want %q", sets[1].Seal.Domain, "gmail.example")
-	}
-	if sets[1].Seal.Selector != "20120806" {
-		t.Errorf("set[1].Seal.Selector = %q, want %q", sets[1].Seal.Selector, "20120806")
-	}
-	if sets[1].Seal.ChainValidation != chainPass {
-		t.Errorf("set[1].Seal.CV = %q, want %q", sets[1].Seal.ChainValidation, string(chainPass))
-	}
-	if sets[1].AMS.Domain != "gmail.example" {
-		t.Errorf("set[1].AMS.Domain = %q, want %q", sets[1].AMS.Domain, "gmail.example")
-	}
-	if sets[1].AAR.AuthServID != "gmail.example" {
-		t.Errorf("set[1].AAR.AuthServID = %q, want %q", sets[1].AAR.AuthServID, "gmail.example")
-	}
+	assert.Equal(t, "gmail.example", sets[1].Seal.Domain)
+	assert.Equal(t, "20120806", sets[1].Seal.Selector)
+	assert.Equal(t, chainPass, sets[1].Seal.ChainValidation)
+	assert.Equal(t, "gmail.example", sets[1].AMS.Domain)
+	assert.Equal(t, "gmail.example", sets[1].AAR.AuthServID)
 
 	// Verify ARC Set 3 (clochette.example.org).
-	if sets[2].Seal.Domain != "clochette.example.org" {
-		t.Errorf("set[2].Seal.Domain = %q, want %q", sets[2].Seal.Domain, "clochette.example.org")
-	}
-	if sets[2].Seal.Selector != "clochette" {
-		t.Errorf("set[2].Seal.Selector = %q, want %q", sets[2].Seal.Selector, "clochette")
-	}
-	if sets[2].Seal.ChainValidation != chainPass {
-		t.Errorf("set[2].Seal.CV = %q, want %q", sets[2].Seal.ChainValidation, string(chainPass))
-	}
-	if sets[2].AMS.Domain != "clochette.example.org" {
-		t.Errorf("set[2].AMS.Domain = %q, want %q", sets[2].AMS.Domain, "clochette.example.org")
-	}
-	if sets[2].AAR.AuthServID != "clochette.example.org" {
-		t.Errorf("set[2].AAR.AuthServID = %q, want %q", sets[2].AAR.AuthServID, "clochette.example.org")
-	}
+	assert.Equal(t, "clochette.example.org", sets[2].Seal.Domain)
+	assert.Equal(t, "clochette", sets[2].Seal.Selector)
+	assert.Equal(t, chainPass, sets[2].Seal.ChainValidation)
+	assert.Equal(t, "clochette.example.org", sets[2].AMS.Domain)
+	assert.Equal(t, "clochette.example.org", sets[2].AAR.AuthServID)
 
 	// Verify all sets use RSA-SHA256.
 	for i, s := range sets {
-		if s.Seal.Algorithm != algRSASHA256 {
-			t.Errorf("set[%d].Seal.Algorithm = %q, want %q", i, s.Seal.Algorithm, algRSASHA256)
-		}
-		if s.AMS.Algorithm != algRSASHA256 {
-			t.Errorf("set[%d].AMS.Algorithm = %q, want %q", i, s.AMS.Algorithm, algRSASHA256)
-		}
+		assert.Equal(t, algRSASHA256, s.Seal.Algorithm, "set[%d].Seal.Algorithm", i)
+		assert.Equal(t, algRSASHA256, s.AMS.Algorithm, "set[%d].AMS.Algorithm", i)
 	}
 
 	// Verify timestamp (all have t=12345).
 	for i, s := range sets {
 		wantT := time.Unix(12345, 0)
-		if !s.Seal.Timestamp.Equal(wantT) {
-			t.Errorf("set[%d].Seal.Timestamp = %v, want %v", i, s.Seal.Timestamp, wantT)
-		}
-		if !s.AMS.Timestamp.Equal(wantT) {
-			t.Errorf("set[%d].AMS.Timestamp = %v, want %v", i, s.AMS.Timestamp, wantT)
-		}
+		assert.True(t, s.Seal.Timestamp.Equal(wantT), "set[%d].Seal.Timestamp = %v, want %v", i, s.Seal.Timestamp, wantT)
+		assert.True(t, s.AMS.Timestamp.Equal(wantT), "set[%d].AMS.Timestamp = %v, want %v", i, s.AMS.Timestamp, wantT)
 	}
 }

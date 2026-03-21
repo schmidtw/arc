@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -26,22 +28,23 @@ type valimailValidateTest struct {
 }
 
 func TestValimailValidationSuite(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("testdata/arc-draft-validation-tests.yml")
 	if err != nil {
 		t.Skipf("test suite not found: %v", err)
 	}
 
 	var suite valimailValidationSuite
-	if err := yaml.Unmarshal(data, &suite); err != nil {
-		t.Fatalf("parsing test suite: %v", err)
-	}
+	require.NoError(t, yaml.Unmarshal(data, &suite))
 
 	// Build resolver from TXT records.
 	resolver := buildTXTRecordResolver(suite.TXTRecords)
-	v := NewValidator(WithResolver(resolver))
+	v, err := NewValidator(WithResolver(resolver))
+	require.NoError(t, err)
 
 	for name, tc := range suite.Tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			msg := tc.Message
 
 			present, err := v.Validate(context.Background(), strings.NewReader(msg))
@@ -49,7 +52,7 @@ func TestValimailValidationSuite(t *testing.T) {
 			var got string
 			switch {
 			case !present && err != nil:
-				t.Fatalf("Validate: %v", err)
+				require.NoError(t, err)
 			case !present:
 				got = "None"
 			case err != nil:
@@ -66,9 +69,7 @@ func TestValimailValidationSuite(t *testing.T) {
 				want = "Fail"
 			}
 
-			if !strings.EqualFold(got, want) {
-				t.Errorf("cv = %q, want %q (%s)", got, want, tc.Description)
-			}
+			assert.True(t, strings.EqualFold(got, want), "cv = %q, want %q (%s)", got, want, tc.Description)
 		})
 	}
 }

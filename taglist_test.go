@@ -5,9 +5,13 @@ package arc
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseTagList(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -115,66 +119,80 @@ func TestParseTagList(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			tl, err := parseTagList(tt.input)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got nil")
-				}
+				require.Error(t, err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			require.NoError(t, err)
 
-			tags := tl.Tags()
-			if len(tags) != len(tt.want) {
-				t.Fatalf("got %d tags, want %d", len(tags), len(tt.want))
-			}
-			for i, got := range tags {
-				if got.Key != tt.want[i].Key || got.Value != tt.want[i].Value {
-					t.Errorf("tag[%d] = {%q, %q}, want {%q, %q}",
-						i, got.Key, got.Value, tt.want[i].Key, tt.want[i].Value)
-				}
-			}
+			assert.Equal(t, tt.want, tl.Tags())
+		})
+	}
+}
+
+func TestIsValidTagName(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "single letter", input: "a", want: true},
+		{name: "uppercase letter", input: "A", want: true},
+		{name: "letters only", input: "abc", want: true},
+		{name: "mixed case", input: "aBcD", want: true},
+		{name: "letter then digits", input: "a123", want: true},
+		{name: "letter then underscore", input: "a_b", want: true},
+		{name: "letter digits underscore", input: "cv_2", want: true},
+		{name: "empty string", input: "", want: false},
+		{name: "starts with digit", input: "1a", want: false},
+		{name: "starts with underscore", input: "_a", want: false},
+		{name: "contains dot", input: "a.b", want: false},
+		{name: "contains hyphen", input: "a-b", want: false},
+		{name: "contains space", input: "a b", want: false},
+		{name: "contains equals", input: "a=b", want: false},
+		{name: "non-ASCII letter", input: "\u00e9", want: false},
+		{name: "ASCII then non-ASCII", input: "a\u00e9", want: false},
+		{name: "digit only", input: "0", want: false},
+		{name: "underscore only", input: "_", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, isValidTagName(tt.input))
 		})
 	}
 }
 
 func TestTagListGet(t *testing.T) {
+	t.Parallel()
 	tl, err := parseTagList("a=rsa-sha256; d=example.com; s=sel1")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	v, ok := tl.Get("a")
-	if !ok || v != "rsa-sha256" {
-		t.Errorf("Get(a) = %q, %v; want rsa-sha256, true", v, ok)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "rsa-sha256", v)
 
 	v, ok = tl.Get("d")
-	if !ok || v != "example.com" {
-		t.Errorf("Get(d) = %q, %v; want example.com, true", v, ok)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "example.com", v)
 
-	v, ok = tl.Get("missing")
-	if ok {
-		t.Errorf("Get(missing) = %q, %v; want '', false", v, ok)
-	}
+	_, ok = tl.Get("missing")
+	assert.False(t, ok)
 }
 
 func TestTagListRequire(t *testing.T) {
+	t.Parallel()
 	tl, err := parseTagList("a=rsa-sha256")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	v, err := tl.Require("a")
-	if err != nil || v != "rsa-sha256" {
-		t.Errorf("Require(a) = %q, %v; want rsa-sha256, nil", v, err)
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, "rsa-sha256", v)
 
 	_, err = tl.Require("missing")
-	if err == nil {
-		t.Error("Require(missing) should return error")
-	}
+	assert.Error(t, err)
 }

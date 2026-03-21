@@ -19,7 +19,10 @@
 //	)
 //
 //	func validateMessage(message io.Reader) error {
-//		v := arc.NewValidator() // uses net.DefaultResolver
+//		v, err := arc.NewValidator() // uses net.DefaultResolver
+//		if err != nil {
+//			return err
+//		}
 //		present, err := v.Validate(context.Background(), message)
 //		if err != nil {
 //			return err // chain validation failed
@@ -54,21 +57,42 @@
 // If validation succeeds, the new set is marked as passing. If validation
 // fails, the new set is marked as failing. Signing is refused if the most
 // recent set in the chain was already marked as failing.
+//
+// To customize validation behavior, provide a validator via [WithValidator]:
+//
+//	validator, err := arc.NewValidator(arc.WithMinRSAKeyBits(2048))
+//	if err != nil {
+//		return nil, err
+//	}
+//	signer, err := arc.NewSigner(privateKey, "sel._domainkey.example.org",
+//		arc.WithValidator(validator))
+//	if err != nil {
+//		return nil, err
+//	}
 package arc
 
 import (
+	"container/list"
 	"context"
 	"crypto"
 	"errors"
-	"fmt"
 	"net"
-	"strings"
+	"sync"
 	"time"
 )
 
 // ErrInvalidSignature is returned when a cryptographic signature verification
 // fails during ARC chain validation. Use [errors.Is] to check for this error.
 var ErrInvalidSignature = errors.New("invalid signature")
+
+// ErrRSAKeyTooSmall is returned when an RSA key is smaller than the configured
+// minimum size during validation or signing. Use [errors.Is] to check for this error.
+var ErrRSAKeyTooSmall = errors.New("RSA key size is too small")
+
+// maxInstanceValue is the maximum ARC instance value defined by RFC 8617.
+// Instance values (i=) range from 1 to 50, making this an absolute limit
+// in the protocol specification.
+const maxInstanceValue = 50
 
 // chainStatus represents the internal validation status of an ARC chain.
 type chainStatus string
@@ -78,9 +102,6 @@ const (
 	chainPass chainStatus = "pass"
 	chainFail chainStatus = "fail"
 )
-
-// MaxInstance is the maximum number of ARC Sets allowed per message.
-const MaxInstance = 50
 
 // aar represents a parsed ARC-Authentication-Results header field.
 type aar struct {
@@ -96,6 +117,7 @@ type ams struct {
 	Algorithm string    // Signing algorithm (a= tag)
 	Signature []byte    // Decoded signature (b= tag)
 	BodyHash  []byte    // Decoded body hash (bh= tag)
+	Canon     string    // Canonicalization algorithm (c= tag, used for validation)
 	Domain    string    // Signing domain (d= tag)
 	Headers   []string  // Signed header fields (h= tag)
 	Selector  string    // Key selector (s= tag)
@@ -136,33 +158,76 @@ type ValidatorOption interface {
 
 // Validator validates ARC chains on email messages.
 type Validator struct {
-	resolver Resolver
+	resolver     Resolver
+	minBits      int
+	maxArcSets   int
+	maxCacheSize int
+	sigCache     map[string]txtKey
+	cacheList    *list.List
+	m            sync.Mutex
+}
+
+type verifyFunc func(algorithm string, data, signature []byte) error
+
+type txtKey struct {
+	txt     string
+	verify  verifyFunc
+	element *list.Element
+}
+
+type cacheEntry struct {
+	key string
 }
 
 // NewValidator creates a new Validator. If no [Resolver] is provided via
-// [WithResolver], [net.DefaultResolver] is used.
-func NewValidator(opts ...ValidatorOption) *Validator {
-	v := Validator{}
+// [WithResolver], [net.DefaultResolver] is used.  By default, the minimum
+// accepted RSA key size is 1024 bits. Use [WithMinRSAKeyBits] to override.
+//
+// The DNS key cache is bounded by default to 1000 entries using LRU eviction.
+// Use [WithMaxCacheSize] to adjust the limit or disable caching.
+//
+// The maximum number of ARC Sets is fixed at 50 per RFC 8617. The RFC defines
+// instance values (i=) as ranging from 1 to 50, making this an absolute limit
+// in the protocol specification.
+func NewValidator(opts ...ValidatorOption) (*Validator, error) {
+	v := Validator{
+		sigCache:   make(map[string]txtKey),
+		cacheList:  list.New(),
+		maxArcSets: maxInstanceValue,
+	}
+
+	defaults := []ValidatorOption{ // nolint:prealloc
+		WithMinRSAKeyBits(1024),
+		WithResolver(net.DefaultResolver),
+		WithMaxCacheSize(1000),
+	}
+	opts = append(defaults, opts...)
+
 	for _, opt := range opts {
 		opt.applyValidator(&v)
 	}
-	if v.resolver == nil {
-		v.resolver = net.DefaultResolver
+
+	if v.minBits < 1024 {
+		return nil, ErrRSAKeyTooSmall
 	}
-	return &v
+
+	return &v, nil
 }
 
 // Signer adds new ARC Sets to email messages.
 type Signer struct {
-	key        crypto.Signer
-	domain     string
-	selector   string
-	authServID string
-	headers    []HeaderField
-	algorithm  string
-	timestamp  time.Time
-	resolver   Resolver
-	validator  *Validator
+	key           crypto.Signer
+	domain        string
+	selector      string
+	authServID    string
+	headers       []HeaderField
+	algorithm     string
+	maxArcSets    int
+	minSignerBits int
+	hashOpt       crypto.SignerOpts
+	timestamp     time.Time
+	resolver      Resolver
+	validator     *Validator
 }
 
 // SignerOption configures a [Signer].
@@ -178,7 +243,7 @@ func (f signerOptionFunc) applySigner(s *Signer) { f(s) }
 // NewSigner creates a new Signer with the given key and domain key FQDN.
 //
 // The key is the private key used for signing. The signing algorithm is
-// inferred from the key type (RSA-SHA256 or Ed25519-SHA256).
+// inferred from the key type (RSA or Ed25519).
 //
 // The domainKey is the DNS domain key FQDN where verifiers look up the
 // corresponding public key:
@@ -187,45 +252,68 @@ func (f signerOptionFunc) applySigner(s *Signer) { f(s) }
 //
 // For example, "2024._domainkey.example.com".
 //
+// A validator is used to validate existing ARC chains before adding a new set.
+// This determines whether the new ARC-Seal will have cv=pass or cv=fail.
+// If no validator is provided via [WithValidator], a default validator with
+// standard settings is created.
+//
 // By default, the default signed headers are used, which include common message
 // headers (From, To, Subject, Date, etc.). Use [WithSignedHeaders] to override
 // this set. If no authentication server ID is set via [WithAuthServID], it
 // defaults to the domain. If no resolver is set, [net.DefaultResolver] is used.
+//
+// The maximum number of ARC Sets is fixed at 50 per RFC 8617. The RFC defines
+// instance values (i=) as ranging from 1 to 50, making this an absolute limit
+// in the protocol specification.
 func NewSigner(key crypto.Signer, domainKey string, opts ...SignerOption) (*Signer, error) {
 	s := Signer{
-		key:     key,
-		headers: append([]HeaderField{}, defaultSignedHeaders...),
+		key:        key,
+		maxArcSets: maxInstanceValue,
 	}
+
+	defaults := []SignerOption{ // nolint:prealloc
+		WithSignedHeaders(defaultSignedHeaders...),
+		WithResolver(net.DefaultResolver),
+		WithMinRSAKeyBits(2048),
+	}
+	opts = append(defaults, opts...)
+
 	for _, opt := range opts {
 		opt.applySigner(&s)
 	}
 
-	// Parse "<selector>._domainkey.<domain>" from the FQDN.
-	const marker = "._domainkey."
-	idx := strings.Index(domainKey, marker)
-	if idx <= 0 {
-		return nil, fmt.Errorf("invalid domain key %q: must be in the form <selector>._domainkey.<domain>", domainKey)
+	if s.minSignerBits < 1024 {
+		return nil, ErrRSAKeyTooSmall
 	}
-	s.selector = domainKey[:idx]
-	s.domain = domainKey[idx+len(marker):]
-	if s.domain == "" {
-		return nil, fmt.Errorf("invalid domain key %q: domain is empty", domainKey)
+
+	// Parse "<selector>._domainkey.<domain>" from the FQDN.
+	var err error
+	s.selector, s.domain, err = splitDomainkey(domainKey)
+	if err != nil {
+		return nil, err
 	}
 
 	if s.authServID == "" {
 		s.authServID = s.domain
 	}
-	if s.resolver == nil {
-		s.resolver = net.DefaultResolver
-	}
-	s.validator = NewValidator(WithResolver(s.resolver))
 
-	// Infer algorithm from key type.
-	algo, err := algorithmForKey(key)
+	// Create a default validator if none was provided.
+	if s.validator == nil {
+		var err error
+		s.validator, err = NewValidator(WithResolver(s.resolver))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Infer algorithm from key type and validate key size.
+	// Per RFC 8301, signers SHOULD use at least 2048 bits for RSA keys.
+	algo, hashOpt, err := algorithmForKey(key, s.minSignerBits)
 	if err != nil {
 		return nil, err
 	}
 	s.algorithm = algo
+	s.hashOpt = hashOpt
 
 	return &s, nil
 }
@@ -252,9 +340,39 @@ func WithTimestamp(ts time.Time) SignerOption {
 // ARC-Authentication-Results header. This identifies the organization
 // that performed authentication checks on the message.
 // If not set, defaults to the signing domain.
+//
+// See https://www.rfc-editor.org/rfc/rfc8601#section-2.5 for guidance
+// on choosing an appropriate value.
 func WithAuthServID(id string) SignerOption {
 	return signerOptionFunc(func(s *Signer) {
 		s.authServID = id
+	})
+}
+
+// WithValidator sets a custom [Validator] for the signer to use when
+// validating existing ARC chains before adding a new set.
+//
+// If not provided, a default validator is created with:
+//   - [net.DefaultResolver] for DNS lookups
+//   - 1024-bit minimum RSA key size (per RFC 8301)
+//   - 50 maximum ARC sets
+//
+// You can create a custom validator to control validation behavior:
+//
+//	v, err := arc.NewValidator(
+//	    arc.WithMinRSAKeyBits(2048),
+//	    arc.WithResolver(customResolver),
+//	)
+//	if err != nil {
+//	    return err
+//	}
+//	signer, err := arc.NewSigner(key, domainKey, arc.WithValidator(v))
+//	if err != nil {
+//	    return err
+//	}
+func WithValidator(v *Validator) SignerOption {
+	return signerOptionFunc(func(s *Signer) {
+		s.validator = v
 	})
 }
 
@@ -277,4 +395,75 @@ func (o resolverOption) applyValidator(v *Validator) { v.resolver = o.resolver }
 // to both [NewValidator] and [NewSigner].
 func WithResolver(r Resolver) Option {
 	return resolverOption{resolver: r}
+}
+
+type minRSAKeyBits struct {
+	bits int
+}
+
+func (o minRSAKeyBits) applyValidator(v *Validator) {
+	v.minBits = o.bits
+}
+
+func (o minRSAKeyBits) applySigner(s *Signer) {
+	s.minSignerBits = o.bits
+}
+
+// WithMinRSAKeyBits sets the minimum accepted RSA key size in bits.
+// This option can be passed to both [NewValidator] and [NewSigner].
+//
+// For validators, this controls the minimum key size accepted when validating
+// other parties' signatures. Default is 1024 bits per RFC 8301 (which updates
+// RFC 6376 Section 3.3.3): verifiers MUST accept 1024-bit to 4096-bit keys.
+//
+// For signers, this controls the minimum key size for the signer's own private
+// key. Default is 2048 bits per RFC 8301, which states that signers SHOULD use
+// at least 2048 bits.
+//
+// Values less than 1024 result in an error.
+//
+// See https://www.rfc-editor.org/rfc/rfc8301 and
+// https://www.rfc-editor.org/rfc/rfc6376#section-3.3.3 for details.
+func WithMinRSAKeyBits(bits int) Option {
+	return minRSAKeyBits{bits: bits}
+}
+
+type maxCacheSize struct {
+	size int
+}
+
+func (o maxCacheSize) applyValidator(v *Validator) {
+	v.maxCacheSize = o.size
+}
+
+// WithMaxCacheSize sets the maximum number of parsed DNS public keys to cache.
+// This option can be passed to [NewValidator].
+//
+// The cache stores parsed key records and built verifier functions. DNS lookups
+// are always performed to fetch the current TXT record; the cache avoids the
+// expensive parsing and cryptographic operations when the DNS record content
+// hasn't changed. This provides content-based cache invalidation - if a key is
+// rotated, the cache detects the change and rebuilds the verifier.
+//
+// The cache uses LRU (Least Recently Used) eviction when the limit is reached.
+//
+// Accepted values:
+//   - 0: Disables caching (always parses and builds verifiers from DNS records)
+//   - Positive integers: Cache up to that many entries with LRU eviction
+//   - -1 or any negative value: Unlimited cache size (all negative values are normalized to -1)
+//
+// Warning: Unlimited cache (-1) is not recommended for long-running services as it
+// can lead to unbounded memory growth.
+//
+// Default is 1000 entries, which should be sufficient for most use cases while
+// preventing unbounded memory growth in long-running validators.
+//
+// Note: The cache does not respect DNS TTL values because Go's [net.Resolver]
+// does not expose TTL information from DNS responses. Cached entries are evicted
+// only by LRU policy or when the DNS record content changes.
+func WithMaxCacheSize(size int) ValidatorOption {
+	if size < 0 {
+		size = -1 // Normalize any negative value to -1 (unlimited)
+	}
+	return maxCacheSize{size: size}
 }

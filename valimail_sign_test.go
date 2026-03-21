@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -38,6 +40,7 @@ type valimailSignTC struct {
 }
 
 func TestValimailSignSuite(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("testdata/arc-draft-sign-tests.yml")
 	if err != nil {
 		t.Skipf("test suite not found: %v", err)
@@ -55,9 +58,7 @@ func TestValimailSignSuite(t *testing.T) {
 		suites = append(suites, suite)
 	}
 
-	if len(suites) == 0 {
-		t.Fatal("no test suites found")
-	}
+	require.NotEmpty(t, suites)
 
 	for _, suite := range suites {
 		// Parse private key if present at suite level.
@@ -75,6 +76,7 @@ func TestValimailSignSuite(t *testing.T) {
 
 		for name, tc := range suite.Tests {
 			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 				// Skip tests where expected output is empty (no signing expected).
 				expectedAS := strings.TrimSpace(tc.AS)
 				expectedAMS := strings.TrimSpace(tc.AMS)
@@ -92,20 +94,20 @@ func TestValimailSignSuite(t *testing.T) {
 				// Extract auth results from the message's Authentication-Results header.
 				authResults := extractAuthResults(tc.Message, tc.SrvID)
 
+				v, err := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(1024))
+				require.NoError(t, err)
 				signer, err := NewSigner(privKey, sel+"._domainkey."+domain,
+					WithValidator(v),
 					WithAuthServID(tc.SrvID),
 					WithSignedHeaders(sigHeaders...),
 					WithTimestamp(time.Unix(tc.T, 0)),
 					WithResolver(resolver),
+					WithMinRSAKeyBits(1024),
 				)
-				if err != nil {
-					t.Fatalf("NewSigner: %v", err)
-				}
+				require.NoError(t, err)
 
 				result, err := signer.Sign(context.Background(), strings.NewReader(tc.Message), authResults)
-				if err != nil {
-					t.Fatalf("Sign: %v", err)
-				}
+				require.NoError(t, err)
 
 				// Since RSA PKCS#1 v1.5 is deterministic, compare signatures.
 				resultStr := string(result)
@@ -123,20 +125,20 @@ func testSignRefused(t *testing.T, tc valimailSignTC, privKey crypto.Signer, dom
 	sigHeaders := toHeaderFields(strings.Split(tc.SigHeaders, ":"))
 	authResults := extractAuthResults(tc.Message, tc.SrvID)
 
+	v, err := NewValidator(WithResolver(resolver), WithMinRSAKeyBits(1024))
+	require.NoError(t, err)
 	signer, err := NewSigner(privKey, sel+"._domainkey."+domain,
+		WithValidator(v),
 		WithAuthServID(tc.SrvID),
 		WithSignedHeaders(sigHeaders...),
 		WithTimestamp(time.Unix(tc.T, 0)),
 		WithResolver(resolver),
+		WithMinRSAKeyBits(1024),
 	)
-	if err != nil {
-		t.Fatalf("NewSigner: %v", err)
-	}
+	require.NoError(t, err)
 
 	_, err = signer.Sign(context.Background(), strings.NewReader(tc.Message), authResults)
-	if err == nil {
-		t.Error("expected Sign to fail for this test case, but it succeeded")
-	}
+	assert.Error(t, err)
 }
 
 // extractAuthResults extracts and merges authentication results from all
@@ -203,18 +205,10 @@ func compareGeneratedSignature(t *testing.T, result, headerName, expected string
 	genSig := extractBTag(result, headerName)
 	expSig := extractBTagFromValue(expected)
 
-	if genSig == "" {
-		t.Errorf("could not find %s b= tag in generated output", headerName)
-		return
-	}
-	if expSig == "" {
-		t.Errorf("could not find b= tag in expected %s", headerName)
-		return
-	}
+	require.NotEmpty(t, genSig, "could not find %s b= tag in generated output", headerName)
+	require.NotEmpty(t, expSig, "could not find b= tag in expected %s", headerName)
 
-	if genSig != expSig {
-		t.Errorf("%s signature mismatch:\n  got:  %s\n  want: %s", headerName, genSig, expSig)
-	}
+	assert.Equal(t, expSig, genSig, "%s signature mismatch", headerName)
 }
 
 // extractBTag extracts the b= tag value from a specific header in a message.
@@ -270,21 +264,15 @@ func extractBTagFromValue(val string) string {
 func parsePrivateKey(t *testing.T, pemStr string) crypto.Signer {
 	t.Helper()
 	block, _ := pem.Decode([]byte(pemStr))
-	if block == nil {
-		t.Fatal("failed to decode PEM private key")
-	}
+	require.NotNil(t, block, "failed to decode PEM private key")
 
 	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err != nil {
 		// Try PKCS8.
 		key8, err2 := x509.ParsePKCS8PrivateKey(block.Bytes)
-		if err2 != nil {
-			t.Fatalf("failed to parse private key: %v / %v", err, err2)
-		}
+		require.NoError(t, err2, "failed to parse private key: PKCS1: %v", err)
 		signer, ok := key8.(crypto.Signer)
-		if !ok {
-			t.Fatal("parsed key does not implement crypto.Signer")
-		}
+		require.True(t, ok, "parsed key does not implement crypto.Signer")
 		return signer
 	}
 	return key

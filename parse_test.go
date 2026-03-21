@@ -7,9 +7,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseAAR(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		input      string
@@ -59,27 +63,21 @@ func TestParseAAR(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			aar, err := parseAAR(tt.input)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
+				require.Error(t, err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if aar.Instance != tt.wantInst {
-				t.Errorf("instance = %d, want %d", aar.Instance, tt.wantInst)
-			}
-			if aar.AuthServID != tt.wantServID {
-				t.Errorf("authServID = %q, want %q", aar.AuthServID, tt.wantServID)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantInst, aar.Instance)
+			assert.Equal(t, tt.wantServID, aar.AuthServID)
 		})
 	}
 }
 
 func TestParseAMS(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -146,42 +144,25 @@ func TestParseAMS(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ams, err := parseAMS(tt.input)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
+				require.Error(t, err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if ams.Instance != tt.wantInst {
-				t.Errorf("instance = %d, want %d", ams.Instance, tt.wantInst)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantInst, ams.Instance)
 			algo := tt.wantAlgo + "-" + tt.wantHash
-			if ams.Algorithm != algo {
-				t.Errorf("algorithm = %q, want %q", ams.Algorithm, algo)
-			}
-			if ams.Domain != tt.wantDom {
-				t.Errorf("domain = %q, want %q", ams.Domain, tt.wantDom)
-			}
-			if ams.Selector != tt.wantSel {
-				t.Errorf("selector = %q, want %q", ams.Selector, tt.wantSel)
-			}
-			if len(ams.Headers) != len(tt.wantHdrs) {
-				t.Fatalf("headers = %v, want %v", ams.Headers, tt.wantHdrs)
-			}
-			for i, h := range ams.Headers {
-				if h != tt.wantHdrs[i] {
-					t.Errorf("header[%d] = %q, want %q", i, h, tt.wantHdrs[i])
-				}
-			}
+			assert.Equal(t, algo, ams.Algorithm)
+			assert.Equal(t, tt.wantDom, ams.Domain)
+			assert.Equal(t, tt.wantSel, ams.Selector)
+			assert.Equal(t, tt.wantHdrs, ams.Headers)
 		})
 	}
 }
 
 func TestParseArcSeal(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -226,43 +207,34 @@ func TestParseArcSeal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			as, err := parseArcSeal(tt.input)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
+				require.Error(t, err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if as.Instance != tt.wantInst {
-				t.Errorf("instance = %d, want %d", as.Instance, tt.wantInst)
-			}
-			if string(as.ChainValidation) != tt.wantCV {
-				t.Errorf("cv = %q, want %q", as.ChainValidation, tt.wantCV)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantInst, as.Instance)
+			assert.Equal(t, tt.wantCV, string(as.ChainValidation))
 		})
 	}
 }
 
 func TestParseAMSTimestamp(t *testing.T) {
+	t.Parallel()
 	input := "i=1; a=rsa-sha256; c=relaxed/relaxed; d=example.org; " +
 		"h=from:to:subject; s=sel; t=1421348401; " +
 		"bh=KWSe46TZKCcDbH4klJPo+tjk5LWJnVRlP5pvjXFZYLQ=; b=dGVzdA=="
 
 	ams, err := parseAMS(input)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	want := time.Unix(1421348401, 0)
-	if !ams.Timestamp.Equal(want) {
-		t.Errorf("timestamp = %v, want %v", ams.Timestamp, want)
-	}
+	assert.True(t, ams.Timestamp.Equal(want), "timestamp = %v, want %v", ams.Timestamp, want)
 }
 
 func TestCollectArcSets(t *testing.T) {
+	t.Parallel()
 	msg := `ARC-Seal: i=2; a=rsa-sha256; cv=pass; d=example2.com; s=sel2; t=12345; b=dGVzdA==
 ARC-Message-Signature: i=2; a=rsa-sha256; c=relaxed/relaxed; d=example2.com; h=from:to:subject; s=sel2; t=12345; bh=KWSe46TZKCcDbH4klJPo+tjk5LWJnVRlP5pvjXFZYLQ=; b=dGVzdA==
 ARC-Authentication-Results: i=2; example2.com; spf=fail
@@ -277,42 +249,27 @@ Body here.
 `
 
 	parsed, err := parseMessage(strings.NewReader(msg))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	sets, err := collectArcSets(parsed)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	if len(sets) != 2 {
-		t.Fatalf("got %d sets, want 2", len(sets))
-	}
+	require.Len(t, sets, 2)
 
 	// Should be sorted by instance.
-	if sets[0].Instance != 1 {
-		t.Errorf("sets[0].Instance = %d, want 1", sets[0].Instance)
-	}
-	if sets[1].Instance != 2 {
-		t.Errorf("sets[1].Instance = %d, want 2", sets[1].Instance)
-	}
+	assert.Equal(t, 1, sets[0].Instance)
+	assert.Equal(t, 2, sets[1].Instance)
 
 	// Check completeness.
 	for i, s := range sets {
-		if s.AAR == nil {
-			t.Errorf("sets[%d].AAR is nil", i)
-		}
-		if s.AMS == nil {
-			t.Errorf("sets[%d].AMS is nil", i)
-		}
-		if s.Seal == nil {
-			t.Errorf("sets[%d].Seal is nil", i)
-		}
+		assert.NotNil(t, s.AAR, "sets[%d].AAR", i)
+		assert.NotNil(t, s.AMS, "sets[%d].AMS", i)
+		assert.NotNil(t, s.Seal, "sets[%d].Seal", i)
 	}
 }
 
 func TestCollectArcSetsEmpty(t *testing.T) {
+	t.Parallel()
 	msg := `From: test@example.com
 To: dest@example.com
 Subject: Test
@@ -320,73 +277,56 @@ Subject: Test
 Body here.
 `
 	parsed, err := parseMessage(strings.NewReader(msg))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	sets, err := collectArcSets(parsed)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	if len(sets) != 0 {
-		t.Fatalf("got %d sets, want 0", len(sets))
-	}
+	require.Empty(t, sets)
 }
 
 func TestParseMessageHeadersAndBody(t *testing.T) {
+	t.Parallel()
 	msg := "From: test@example.com\r\nTo: dest@example.com\r\nSubject: Hello\r\n\r\nBody content here.\r\n"
 
 	parsed, err := parseMessage(strings.NewReader(msg))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	if len(parsed.Headers) != 3 {
-		t.Fatalf("got %d headers, want 3", len(parsed.Headers))
-	}
+	require.Len(t, parsed.Headers, 3)
 
-	if parsed.Headers[0].Key != "From" {
-		t.Errorf("header[0].Key = %q, want From", parsed.Headers[0].Key)
-	}
-	if !strings.Contains(parsed.Headers[0].Value, "test@example.com") {
-		t.Errorf("header[0].Value = %q, missing test@example.com", parsed.Headers[0].Value)
-	}
+	assert.Equal(t, "From", parsed.Headers[0].Key)
+	assert.Contains(t, parsed.Headers[0].Value, "test@example.com")
 
-	if !strings.Contains(string(parsed.Body), "Body content here.") {
-		t.Errorf("body = %q, missing expected content", string(parsed.Body))
-	}
+	assert.Contains(t, string(parsed.Body), "Body content here.")
+}
+
+func TestParseMessageWithLongBodyLine(t *testing.T) {
+	t.Parallel()
+	// Test that messages with very long body lines don't cause scanner failures.
+	// bufio.Scanner has a default token limit of 64KB, which could cause failures
+	// if we continued scanning the body after finding headers.
+	longLine := strings.Repeat("A", 100000) // 100KB line, exceeds scanner default
+	msg := "From: test@example.com\r\nSubject: Test\r\n\r\n" + longLine + "\r\n"
+
+	parsed, err := parseMessage(strings.NewReader(msg))
+	require.NoError(t, err)
+
+	require.Len(t, parsed.Headers, 2)
+	assert.Equal(t, "From", parsed.Headers[0].Key)
+	assert.Equal(t, "Subject", parsed.Headers[1].Key)
+
+	// Body should contain the long line
+	assert.Contains(t, string(parsed.Body), longLine)
 }
 
 func TestSerializeAARRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := Signer{
 		authServID: "lists.example.org",
 	}
 	hdr := s.serializeAAR(1, "spf=pass smtp.mfrom=jqd@d1.example")
 	// Should start with the header name.
-	if !strings.HasPrefix(hdr, "ARC-Authentication-Results:") {
-		t.Errorf("unexpected prefix: %q", hdr)
-	}
-	if !strings.Contains(hdr, "i=1") {
-		t.Error("missing instance tag")
-	}
-	if !strings.Contains(hdr, "lists.example.org") {
-		t.Error("missing authserv-id")
-	}
-}
-
-func TestFoldHeader(t *testing.T) {
-	short := "ARC-Seal: i=1; a=rsa-sha256; cv=none; d=ex.com; s=s; b=dGVzdA=="
-	folded := foldHeader(short)
-	if folded != short {
-		t.Errorf("short header should not be folded: %q", folded)
-	}
-
-	long := "ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=example.org; h=from:to:subject:date:message-id; s=selector; t=12345678; bh=KWSe46TZKCcDbH4klJPo+tjk5LWJnVRlP5pvjXFZYLQ=; b=dGVzdHNpZ25hdHVyZXZhbHVlaGVyZQ=="
-	folded = foldHeader(long)
-	for _, line := range strings.Split(folded, "\r\n") {
-		if len(line) > 78 {
-			t.Errorf("folded line too long (%d): %q", len(line), line)
-		}
-	}
+	assert.True(t, strings.HasPrefix(hdr, "ARC-Authentication-Results:"))
+	assert.Contains(t, hdr, "i=1")
+	assert.Contains(t, hdr, "lists.example.org")
 }
