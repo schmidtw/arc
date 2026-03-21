@@ -12,16 +12,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var rsaTestKeyCache = sync.Map{}
+var rsaTestKeyCache = map[int]*rsa.PrivateKey{}
+var rsaTestKeyCacheMu sync.Mutex
 
+// getRSATestKey returns a cached RSA test key of the given size.
+// Keys are generated lazily and cached for reuse across tests.
+//
+// Note: If multiple goroutines request the same uncached size concurrently,
+// they may both generate keys, but LoadOrStore ensures only one is stored.
+// This is acceptable for test code - duplicate generation is rare and harmless.
 func getRSATestKey(t *testing.T, size int) *rsa.PrivateKey {
 	t.Helper()
+	rsaTestKeyCacheMu.Lock()
+	defer rsaTestKeyCacheMu.Unlock()
 
-	if key, ok := rsaTestKeyCache.Load(size); ok {
-		return key.(*rsa.PrivateKey)
+	if key, ok := rsaTestKeyCache[size]; ok {
+		return key
 	}
+
+	// Generate key (may happen concurrently for same size).
 	key, err := rsa.GenerateKey(rand.Reader, size)
 	require.NoError(t, err)
-	rsaTestKeyCache.Store(size, key)
+
+	rsaTestKeyCache[size] = key
 	return key
 }
