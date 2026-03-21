@@ -80,6 +80,11 @@ var ErrInvalidSignature = errors.New("invalid signature")
 // minimum size during validation or signing. Use [errors.Is] to check for this error.
 var ErrRSAKeyTooSmall = errors.New("RSA key size is too small")
 
+// maxInstanceValue is the maximum ARC instance value defined by RFC 8617.
+// Instance values (i=) range from 1 to 50, making this an absolute limit
+// in the protocol specification.
+const maxInstanceValue = 50
+
 // chainStatus represents the internal validation status of an ARC chain.
 type chainStatus string
 
@@ -179,7 +184,7 @@ func NewValidator(opts ...ValidatorOption) (*Validator, error) {
 	v := Validator{
 		sigCache:   make(map[string]txtKey),
 		cacheList:  list.New(),
-		maxArcSets: 50, // Fixed per RFC 8617 - instance values range from 1 to 50.
+		maxArcSets: maxInstanceValue,
 	}
 
 	defaults := []ValidatorOption{ // nolint:prealloc
@@ -254,7 +259,7 @@ func (f signerOptionFunc) applySigner(s *Signer) { f(s) }
 func NewSigner(key crypto.Signer, domainKey string, opts ...SignerOption) (*Signer, error) {
 	s := Signer{
 		key:        key,
-		maxArcSets: 50, // Fixed per RFC 8617 - instance values range from 1 to 50.
+		maxArcSets: maxInstanceValue,
 	}
 
 	defaults := []SignerOption{ // nolint:prealloc

@@ -258,8 +258,8 @@ func parseInstanceValue(value string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("invalid instance value %q: %w", value, err)
 	}
-	if i < 1 || i > 50 {
-		return 0, fmt.Errorf("instance value %d out of range [1, 50]", i)
+	if i < 1 || i > maxInstanceValue {
+		return 0, fmt.Errorf("instance value %d out of range [1, %d]", i, maxInstanceValue)
 	}
 	return i, nil
 }
