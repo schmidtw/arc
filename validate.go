@@ -401,10 +401,8 @@ func removeSignatureFromHeader(name, raw string) string {
 		fullHeader = name + ":" + raw
 	}
 
-	// Find the signature tag and empty its value.
-	// Handle folded headers by unfolding first.
-	unfolded := strings.ReplaceAll(fullHeader, "\r\n", "")
-	unfolded = strings.ReplaceAll(unfolded, "\n", "")
+	// Unfold the header properly using the same algorithm as canonicalization.
+	unfolded := unfoldHeader(fullHeader)
 
 	// Find "b=" (the signature tag, not "bh=" the body hash tag).
 	result := removeBTag(unfolded)

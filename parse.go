@@ -121,10 +121,13 @@ func parseHeaderList(val string) []string {
 }
 
 // unfoldHeader removes header folding (CRLF followed by whitespace).
+// According to RFC 5322, folding white space (FWS) is CRLF followed by at least one
+// WSP character (space or tab). When unfolding, we remove the CRLF but keep the WSP.
 func unfoldHeader(s string) string {
+	// The order of replacements matters.
 	s = strings.ReplaceAll(s, "\r\n ", " ")
-	s = strings.ReplaceAll(s, "\r\n\t", " ")
+	s = strings.ReplaceAll(s, "\r\n\t", "\t")
 	s = strings.ReplaceAll(s, "\n ", " ")
-	s = strings.ReplaceAll(s, "\n\t", " ")
+	s = strings.ReplaceAll(s, "\n\t", "\t")
 	return s
 }
