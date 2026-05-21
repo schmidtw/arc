@@ -22,6 +22,7 @@ linters:
       errorf: false
     goconst:
       min-occurrences: 4
+      ignore-tests: true
     misspell:
       locale: US
   exclusions:
