@@ -1,15 +1,21 @@
-# SPDX-FileCopyrightText: 2022 Comcast Cable Communications Management, LLC
+# SPDX-FileCopyrightText: 2022 Weston Schmidt <weston_schmidt@alumni.purdue.edu>
 # SPDX-License-Identifier: Apache-2.0
 ---
 name: 'Dependabot auto approval'
 
 on:
-  pull_request_target
+  push:
+    branches:
+      - main
+
+  pull_request:
+  workflow_dispatch:
+
 permissions:
   pull-requests: write
   contents: write
 
 jobs:
-  package:
-    uses: xmidt-org/.github/.github/workflows/dependabot-approver-template.yml@main
+  ci:
+    uses: goschtalt/.github/.github/workflows/approve-dependabot.yml@75b1afa89dbf65dd2cf66bbdcd89cda3de1e12d4 # v6.1.0
     secrets: inherit
