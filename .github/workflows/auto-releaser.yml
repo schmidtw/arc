@@ -13,6 +13,5 @@ permissions:
 
 jobs:
   release:
-    uses: xmidt-org/shared-go/.github/workflows/auto-releaser.yml@08c8b2d70d9d65f08d49336ef6fa6b42bccc4cff # v4.11.8
-    secrets:
-      PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+    #uses: xmidt-org/shared-go/.github/workflows/auto-releaser.yml@08c8b2d70d9d65f08d49336ef6fa6b42bccc4cff # v4.11.8
+    uses: xmidt-org/shared-go/.github/workflows/auto-releaser.yml@bf189b2c40e583cdaee276d666b69d3f47598ec7
