@@ -13,4 +13,4 @@ permissions:
 
 jobs:
   release:
-    uses: xmidt-org/shared-go/.github/workflows/auto-releaser.yml@cc395e10a62930f283767e3eaab09f53a249079b # v4.13.9
+    uses: xmidt-org/shared-go/.github/workflows/auto-releaser.yml@ad74ac3c35cee9b142a9010d8e3a873f10cabb9a # v4.13.13
